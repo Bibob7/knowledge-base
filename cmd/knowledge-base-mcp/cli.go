@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -50,6 +51,12 @@ func runSubcommand(args []string) (handled bool, code int) {
 		return true, 0
 	case "reindex":
 		if err := runReindex(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return true, 1
+		}
+		return true, 0
+	case "migrate":
+		if err := runMigrate(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return true, 1
 		}
@@ -323,6 +330,56 @@ func runReindex(args []string) error {
 		Embed:     client.Embed,
 		Logf:      func(f string, a ...any) { fmt.Printf("reindex: "+f+"\n", a...) },
 	})
+}
+
+// runMigrate copies the whole knowledge base into another, empty database (see
+// store.Migrate). The source is not changed; switching the configuration over is up to
+// the caller (/knowledge-base:setup --migrate-to-sqlite does both).
+func runMigrate(args []string) error {
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	from := fs.String("from", "", "source database URL (default: the configured DATABASE_URL)")
+	to := fs.String("to", "", "target database URL, must be empty (default: sqlite://"+config.DatabasePath()+")")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := config.LoadDotEnv(); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if *from == "" {
+		*from = cfg.DatabaseURL
+	}
+	if *to == "" {
+		*to = "sqlite://" + config.DatabasePath()
+	}
+	if *from == *to {
+		return fmt.Errorf("source and target are the same database (%s)", redactURL(*to))
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	fmt.Printf("migrating %s -> %s\n", redactURL(*from), redactURL(*to))
+	res, err := store.Migrate(ctx, *from, *to, cfg.EmbeddingModel)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("migrated %d entries with %d chunks (model %s, %d dimensions); the source is unchanged\n",
+		res.Docs, res.Chunks, res.Model, res.Dim)
+	return nil
+}
+
+// redactURL hides the password of a database URL for output.
+func redactURL(s string) string {
+	u, err := url.Parse(s)
+	if err != nil || u.User == nil {
+		return s
+	}
+	if _, ok := u.User.Password(); ok {
+		u.User = url.UserPassword(u.User.Username(), "xxxxx")
+	}
+	return u.String()
 }
 
 // runViz serves a live, read-only view of the knowledge base on a loopback address.

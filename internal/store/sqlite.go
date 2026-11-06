@@ -229,7 +229,7 @@ func (s *sqliteStore) AddDocument(ctx context.Context, in DocumentInput) (AddRes
 	if in.Kind == "" {
 		in.Kind = "document"
 	}
-	tags, err := json.Marshal(in.Tags)
+	tags, err := encodeTags(in.Tags)
 	if err != nil {
 		return res, err
 	}
@@ -250,7 +250,7 @@ func (s *sqliteStore) AddDocument(ctx context.Context, in DocumentInput) (AddRes
 	if err := tx.QueryRowContext(ctx,
 		`INSERT INTO documents (title, source, project, kind, tags, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-		in.Title, nilIfEmpty(in.Source), nilIfEmpty(in.Project), in.Kind, string(tags), now, now).Scan(&res.ID); err != nil {
+		in.Title, nilIfEmpty(in.Source), nilIfEmpty(in.Project), in.Kind, tags, now, now).Scan(&res.ID); err != nil {
 		return res, err
 	}
 	ins, err := tx.PrepareContext(ctx, `INSERT INTO chunks (document_id, idx, content, embedding) VALUES (?, ?, ?, ?)`)
@@ -943,6 +943,14 @@ func cosineBlob(b []byte, q []float32, qn float64) float64 {
 		return 0
 	}
 	return dot / (math.Sqrt(n) * qn)
+}
+
+func encodeTags(tags []string) (string, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	b, err := json.Marshal(tags)
+	return string(b), err
 }
 
 func decodeTags(s string) ([]string, error) {
