@@ -161,3 +161,17 @@ func TestParseTranscriptToleratesSpacedJSON(t *testing.T) {
 		t.Fatalf("UserMsgs=%d err=%v", c.UserMsgs, err)
 	}
 }
+
+func TestIsRememberTool(t *testing.T) {
+	for name, want := range map[string]bool{
+		"mcp__knowledge-base__remember":                   true,
+		"mcp__plugin_knowledge-base_kb__remember":         true,
+		"mcp__plugin_knowledge-base_kb__search_knowledge": false,
+		"mcp__plugin_other_kb__remember":                  false,
+		"mcp__memory__remember":                           false,
+	} {
+		if got := isRememberTool(name); got != want {
+			t.Errorf("isRememberTool(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

@@ -1,0 +1,12 @@
+{
+  "name": "cubicus",
+  "description": "Claude Code plugins by Cubicus",
+  "owner": { "name": "Kevin Kreitner" },
+  "plugins": [
+    {
+      "name": "knowledge-base",
+      "source": "./",
+      "description": "Persistent knowledge base that learns across sessions and projects"
+    }
+  ]
+}

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -60,8 +59,10 @@ func runSubcommand(args []string) (handled bool, code int) {
 			return true, 1
 		}
 		return true, 0
-	case "install-hooks", "uninstall-hooks":
-		if err := manageHooks(args[0] == "install-hooks"); err != nil {
+	case "uninstall-hooks":
+		// Hooks now come with the Claude Code plugin; this only cleans up hooks that older
+		// versions wrote into ~/.claude/settings.json.
+		if err := uninstallLegacyHooks(); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return true, 1
 		}
@@ -127,34 +128,19 @@ func runHook() error {
 	return hook.Run(ctx, bytes.NewReader(data), os.Stdout, d)
 }
 
-func manageHooks(install bool) error {
+func uninstallLegacyHooks() error {
 	path, err := hook.DefaultSettingsPath()
 	if err != nil {
 		return err
 	}
-	var changed bool
-	if install {
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		if exe, err = filepath.EvalSymlinks(exe); err != nil {
-			return err
-		}
-		changed, err = hook.Install(path, hook.Command(exe))
-		if err != nil {
-			return err
-		}
-	} else if changed, err = hook.Uninstall(path); err != nil {
+	changed, err := hook.Uninstall(path)
+	if err != nil {
 		return err
 	}
-	switch {
-	case !changed:
-		fmt.Printf("%s: no change needed\n", path)
-	case install:
-		fmt.Printf("Hooks (%v) added to %s (backup: %s.kb-backup)\n", hook.Events, path, path)
-	default:
+	if changed {
 		fmt.Printf("Hooks removed from %s (backup: %s.kb-backup)\n", path, path)
+	} else {
+		fmt.Printf("%s: no change needed\n", path)
 	}
 	return nil
 }

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Launcher for knowledge-base-mcp, used by the plugin's MCP server and hooks.
+#
+# The Go binary is built once per plugin version into the plugin's data directory
+# (${CLAUDE_PLUGIN_DATA}, kept across plugin updates) and then executed with all arguments.
+#
+#   kb [args...]   build if needed, then run the binary (no args: MCP server on stdio)
+#   kb hook        run the hook; if the binary is not built yet, do nothing (a hook must never block)
+#   kb --ensure    only build if needed and print the binary path
+#   kb --path      print the binary path without building
+#
+# KB_FORCE_BUILD=1 rebuilds even if the binary for this version exists (for development).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DATA="${CLAUDE_PLUGIN_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/knowledge-base}"
+VERSION="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" | head -n1)"
+VERSION="${VERSION:-dev}"
+BIN_DIR="$DATA/bin"
+BIN="$BIN_DIR/knowledge-base-mcp-$VERSION"
+
+find_go() {
+  if command -v go >/dev/null 2>&1; then command -v go; return; fi
+  for g in /usr/local/go/bin/go /opt/homebrew/bin/go "$HOME/go/bin/go" "$HOME/.local/go/bin/go"; do
+    if [ -x "$g" ]; then echo "$g"; return; fi
+  done
+  return 1
+}
+
+build() {
+  local go lock tmp waited=0
+  mkdir -p "$BIN_DIR"
+  lock="$DATA/build.lock"
+  # One build at a time (MCP server, hooks and setup may start together). A lock older
+  # than 15 minutes is left over from a killed build.
+  until mkdir "$lock" 2>/dev/null; do
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +15 2>/dev/null)" ]; then rmdir "$lock" 2>/dev/null || true; continue; fi
+    if [ "$waited" -ge 600 ]; then echo "knowledge-base: timed out waiting for another build ($lock)" >&2; return 1; fi
+    sleep 1; waited=$((waited + 1))
+  done
+  # Released explicitly below: 'exec' after a successful build would skip an EXIT trap.
+  trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+  if [ -x "$BIN" ] && [ "${KB_FORCE_BUILD:-0}" != 1 ]; then # built while we waited
+    rmdir "$lock" 2>/dev/null || true; trap - EXIT; return 0
+  fi
+
+  if ! go="$(find_go)"; then
+    echo "knowledge-base: Go is required to build the server (https://go.dev/dl/), then run /knowledge-base:setup" >&2
+    return 1
+  fi
+  echo "knowledge-base: building knowledge-base-mcp $VERSION (one-time, this can take a minute)" >&2
+  tmp="$BIN.tmp.$$"
+  (cd "$ROOT" && "$go" build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$tmp" ./cmd/knowledge-base-mcp) >&2
+  # Rename instead of copying over the old file: on macOS overwriting a signed binary in
+  # place gets the process killed (cached code signature).
+  mv -f "$tmp" "$BIN"
+  # Binaries of older versions are no longer used.
+  find "$BIN_DIR" -maxdepth 1 -name 'knowledge-base-mcp-*' ! -name "knowledge-base-mcp-$VERSION" -exec rm -f {} + 2>/dev/null || true
+  rmdir "$lock" 2>/dev/null || true; trap - EXIT
+}
+
+ensure() {
+  if [ ! -x "$BIN" ] || [ "${KB_FORCE_BUILD:-0}" = 1 ]; then build; fi
+}
+
+case "${1:-}" in
+  hook)
+    # Never build (or fail) inside a hook: the MCP server or /knowledge-base:setup builds.
+    [ -x "$BIN" ] || exit 0
+    exec "$BIN" "$@"
+    ;;
+  --path)
+    echo "$BIN"
+    ;;
+  --ensure)
+    ensure
+    echo "$BIN"
+    ;;
+  *)
+    ensure
+    exec "$BIN" "$@"
+    ;;
+esac

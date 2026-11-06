@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -21,6 +22,15 @@ import (
 	"github.com/kevin/knowledge-base/internal/secrets"
 	"github.com/kevin/knowledge-base/internal/store"
 )
+
+// instructions tell Claude when to search, remember and supersede. MCP clients put them into
+// the system prompt (Claude Code cuts them after 4096 characters).
+//
+//go:embed instructions.md
+var instructions string
+
+// version is set at build time (-ldflags "-X main.version=...") by scripts/kb.
+var version = "dev"
 
 type app struct {
 	cfg   config.Config
@@ -68,7 +78,8 @@ func run() error {
 		return a.check(ctx)
 	}
 
-	server := mcp.NewServer(&mcp.Implementation{Name: "knowledge-base", Version: "0.2.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "knowledge-base", Version: version},
+		&mcp.ServerOptions{Instructions: instructions})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",

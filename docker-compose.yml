@@ -1,3 +1,7 @@
+# Fixed project name: the plugin runs this file from a different directory for every
+# version, and the default project name (the directory) would change the volume name.
+name: knowledge-base
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
