@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: ${KB_CONTAINER_NAME:-knowledge-base-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kb}
+      POSTGRES_DB: ${POSTGRES_DB:-knowledge_base}
+    ports:
+      # Nur lokal erreichbar. 5433, damit es nicht mit einem lokalen Postgres kollidiert.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - kb-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kb} -d ${POSTGRES_DB:-knowledge_base}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kb-pgdata:
