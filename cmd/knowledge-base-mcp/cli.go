@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +35,12 @@ func runSubcommand(args []string) (handled bool, code int) {
 	case "extract":
 		if err := runExtract(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), "extract error:", err)
+			return true, 1
+		}
+		return true, 0
+	case "reindex":
+		if err := runReindex(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
 			return true, 1
 		}
 		return true, 0
@@ -83,17 +88,11 @@ func runHook() error {
 	}
 	defer st.Close()
 
-	minSim := hook.DefaultMinSim
-	if v := os.Getenv("KB_HOOK_MIN_SIM"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			minSim = f
-		}
-	}
 	d := hook.Deps{
 		Store:       st,
 		Embed:       embed.New(cfg.EmbeddingBaseURL, cfg.EmbeddingModel, cfg.EmbeddingAPIKey, cfg.EmbeddingDim),
 		QueryPrefix: cfg.EmbeddingQueryPrefix,
-		MinSim:      minSim,
+		MinSim:      cfg.HookMinSim,
 	}
 	if os.Getenv("KB_HOOK_DEBUG") != "" {
 		d.Debug = os.Stderr
@@ -187,12 +186,61 @@ func runExtract(args []string) error {
 	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	d := extract.Deps{
-		Store:     st,
-		Embed:     embed.New(cfg.EmbeddingBaseURL, cfg.EmbeddingModel, cfg.EmbeddingAPIKey, cfg.EmbeddingDim),
-		DocPrefix: cfg.EmbeddingDocPrefix,
-		Runner:    extract.ClaudeCLI{Model: os.Getenv("KB_EXTRACT_MODEL")},
-		StateDir:  extract.StateDir(),
-		Logf:      func(f string, a ...any) { logger.Printf("extract: "+f, a...) },
+		Store:         st,
+		Embed:         embed.New(cfg.EmbeddingBaseURL, cfg.EmbeddingModel, cfg.EmbeddingAPIKey, cfg.EmbeddingDim),
+		DocPrefix:     cfg.EmbeddingDocPrefix,
+		ConflictFloor: cfg.SimilarMin,
+		Runner:        extract.ClaudeCLI{Model: os.Getenv("KB_EXTRACT_MODEL")},
+		StateDir:      extract.StateDir(),
+		Logf:          func(f string, a ...any) { logger.Printf("extract: "+f, a...) },
 	}
 	return extract.Run(ctx, d, extract.Options{Transcript: *transcript, SessionID: *session, Project: proj, DryRun: *dry})
+}
+
+// runReindex re-embeds all stored chunks with the configured model (see store.Reindex).
+func runReindex(args []string) error {
+	fs := flag.NewFlagSet("reindex", flag.ContinueOnError)
+	yes := fs.Bool("yes", false, "do not ask for confirmation")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	defer cancel()
+	if err := config.LoadDotEnv(); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	dim, model, err := st.CurrentEmbedding(ctx)
+	if err != nil {
+		return err
+	}
+	if model == "" {
+		model = "(unknown)"
+	}
+	fmt.Printf("stored vectors:  model %s, %d dimensions\nconfigured:      model %s, %d dimensions\n", model, dim, cfg.EmbeddingModel, cfg.EmbeddingDim)
+	fmt.Println("All chunks will be re-embedded and the vector column and index rebuilt. Make a backup first (pg_dump).")
+	if !*yes {
+		fmt.Print("Continue? [y/N] ")
+		var a string
+		fmt.Scanln(&a)
+		if a = strings.ToLower(strings.TrimSpace(a)); a != "y" && a != "yes" {
+			return fmt.Errorf("aborted")
+		}
+	}
+	client := embed.New(cfg.EmbeddingBaseURL, cfg.EmbeddingModel, cfg.EmbeddingAPIKey, cfg.EmbeddingDim)
+	return st.Reindex(ctx, store.ReindexOptions{
+		Model:     cfg.EmbeddingModel,
+		Dim:       cfg.EmbeddingDim,
+		DocPrefix: cfg.EmbeddingDocPrefix,
+		Embed:     client.Embed,
+		Logf:      func(f string, a ...any) { fmt.Printf("reindex: "+f+"\n", a...) },
+	})
 }

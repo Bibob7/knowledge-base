@@ -17,7 +17,7 @@ The installer is idempotent (running it again updates) and does the following:
 
 1. Creates `.env` with a random Postgres password (mode 600)
 2. Starts Postgres + pgvector via Docker
-3. Pulls the embedding model `nomic-embed-text` via Ollama
+3. Pulls the embedding model `bge-m3` via Ollama
 4. Builds the MCP server into `bin/` and tests it with `bin/knowledge-base-mcp --check`
 5. After asking, copies the rules file to `~/.claude/rules/`, registers the MCP server with Claude Code and adds the hooks to `~/.claude/settings.json`
 
@@ -45,14 +45,15 @@ over TLS and with its own password.
 
 ```bash
 cp .env.example .env && docker compose up -d
-ollama pull nomic-embed-text
+ollama pull bge-m3
 go build -o bin/knowledge-base-mcp ./cmd/knowledge-base-mcp
 claude mcp add knowledge-base --scope user -- "$PWD/bin/knowledge-base-mcp"
 cp claude/rules/knowledge-base.md ~/.claude/rules/
 bin/knowledge-base-mcp install-hooks
 ```
 
-Different embedding model (e.g. OpenAI): adjust `EMBEDDING_*` in `.env`, see `.env.example`.
+Different embedding model (e.g. OpenAI): adjust `EMBEDDING_*` in `.env`, see `.env.example`. Switching models
+on an existing database: see [Embedding model](#embedding-model).
 Claude Desktop: the same command as an entry in `claude_desktop_config.json`.
 
 ## Tools
@@ -91,9 +92,11 @@ bin/knowledge-base-mcp uninstall-hooks   # remove only our own entries
 The installer does this automatically. Existing hooks and the key order are preserved;
 restart Claude Code after changes.
 
-Relevance filter: only hits with a cosine similarity >= 0.67 are injected (`KB_HOOK_MIN_SIM`).
-The value is calibrated for `nomic-embed-text` (unrelated prompts reach about 0.55-0.66, matching ones
-0.67-0.77) and deliberately prefers missing a hit over showing noise on every prompt.
+Relevance filter: only hits with a cosine similarity above the model's threshold are injected
+(`KB_HOOK_MIN_SIM`, see [Embedding model](#embedding-model)). For `bge-m3` it is 0.52: off-topic prompts stayed
+below 0.483 while matching entries were mostly above 0.5. On the live knowledge base 20 of 23 matching prompts
+got the right entry and 0 of 9 off-topic prompts triggered an injection. The filter deliberately prefers
+missing a hit over showing noise on every prompt.
 Troubleshooting: `KB_HOOK_DEBUG=1` prints all candidates with their similarity to stderr, e.g.
 
 ```bash
@@ -113,9 +116,11 @@ In addition to the immediate `remember` during the session, a `SessionEnd` hook 
 3. A lean `claude -p` run (model `sonnet`, without tools, MCP, hooks and settings) extracts corrections,
    preferences/decisions and verified facts that cannot be read from the code. The prompt is deliberately
    strict: better 0-2 strong facts than many weak ones.
-4. Every fact is checked against the knowledge base: similarity >= 0.92 counts as known and is discarded;
-   between 0.78 and 0.92 a second model call decides `add`, `skip` or `supersede` (only with IDs that were
-   presented to it; when in doubt `skip`). Secrets are filtered out.
+4. Every fact is checked against the knowledge base: a near-verbatim copy (similarity >= 0.98) counts as known
+   and is discarded; from the model's "similar" threshold upwards (`bge-m3`: 0.70) a second model call decides
+   `add`, `skip` or `supersede` (only with IDs that were presented to it; when in doubt `skip`). Similarity
+   alone cannot tell a contradiction from a paraphrase (both score 0.89-0.96), so it never discards a
+   correction by itself. Secrets are filtered out.
 5. Stored entries carry the tag `auto`; corrections additionally `correction`. To review:
    `list_documents` with `tag: auto`, or `tail ~/Library/Caches/knowledge-base/extract.log` (Linux: `~/.cache/knowledge-base/`).
 
@@ -145,10 +150,49 @@ The behavior is controlled by the rules file `claude/rules/knowledge-base.md` (c
 `~/.claude/rules/` and loaded automatically by Claude Code): search first when working on a task, call
 `remember` immediately on corrections/decisions/findings, replace outdated entries via `supersede`.
 
+## Embedding model
+
+The default is `bge-m3` (1024 dimensions, multilingual, via Ollama). On the real knowledge base (37 entries,
+23 questions with a known target, 9 off-topic prompts) it ranked the target first for 22 of 23 questions
+(`nomic-embed-text`: 13, `embeddinggemma-2`: 20, `qwen3-embedding:4b`: 20). The top models are within one or
+two questions of each other, so that is not a statistically solid ranking, only a reason to stay with a good
+default. Public benchmarks rank other models higher on German Wikipedia; test candidates on your own data.
+
+Thresholds depend on the model. Each known model has a profile in `internal/config` (dimension, prefixes,
+hook threshold, "similar" threshold); for other models set `EMBEDDING_DIM` and calibrate
+(`KB_HOOK_DEBUG=1` prints the similarities) before overriding `KB_HOOK_MIN_SIM` / `KB_SIMILAR_MIN_SIM`.
+
+The dimension and the model name are stored with the data, and the server refuses to start if they differ from
+the configuration. To switch models on an existing database (make a `pg_dump` backup first):
+
+```bash
+ollama pull <new-model>
+# set EMBEDDING_MODEL (and EMBEDDING_DIM for unknown models) in .env
+bin/knowledge-base-mcp reindex
+```
+
+`reindex` re-embeds every chunk (also those of superseded entries) into a staging table, so an interrupted run
+can simply be repeated, and then swaps the vector column and rebuilds the index in one transaction. IDs and
+history are kept. Afterwards restart Claude Code. Dimensions above 2000 are not supported (they would need
+`halfvec`). All users of a shared database must use the same model.
+
+## Scaling
+
+pgvector applies `WHERE` filters after the approximate HNSW scan, which silently drops results when a query is
+limited to one of many projects. Measured on 150k chunks in 150 projects, this returned only 8.9 of 50 rows
+(recall 0.18). Searches and similarity checks therefore select the rows of the project (or tag) first and sort
+them exactly (4.9 ms, recall 1.0 in the same benchmark); only unfiltered searches use the HNSW index, with
+iterative scans enabled. The same benchmark: HNSW search without filter 5 ms, brute force over all 150k rows
+132 ms, index build 99 s (293 MB). Limits: a single project with far more than ~100k chunks would need its own
+index (partial index or partitioning), and the HNSW index should fit in memory. `docker-compose.yml` therefore
+sets `shared_buffers` and `maintenance_work_mem` to 512 MB and `shm_size` to 1 GB (parallel index builds fail
+with Docker's 64 MB default); raise them on larger machines (see `.env.example`).
+
 ## Notes
 
-- **Do not change the embedding model afterwards.** The vector dimension is fixed in the schema on first start; the server aborts if `EMBEDDING_DIM` differs. When switching models, delete the volume (`docker compose down -v`) and re-ingest.
+- **Switching the embedding model** needs `bin/knowledge-base-mcp reindex` (see [Embedding model](#embedding-model)).
+- On macOS never copy a new binary over `bin/knowledge-base-mcp` with `cp`; the process is killed (exit 137) because the old code signature is cached. Run `rm` first or use `go build -o`.
 - The server works with any OpenAI-compatible `/embeddings` endpoint (Ollama, OpenAI, LM Studio, vLLM).
 - Data lives in the Docker volume `kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
 - Postgres is bound to `127.0.0.1` only. The default credentials (`kb`/`kb`) are meant for local use only.
-- Tests: `go test ./...`
+- Tests: `go test ./...`. The integration test in `internal/store` needs a dedicated empty database: `KB_TEST_DATABASE_URL='postgres://kb:kb@localhost:5433/kb_test?sslmode=disable' go test ./internal/store` (create `kb_test` first).

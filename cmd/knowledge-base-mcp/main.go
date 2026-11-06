@@ -52,7 +52,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.EmbeddingDim, cfg.EmbeddingModel)
 	if err != nil {
 		return err
 	}
@@ -118,11 +118,8 @@ func run() error {
 	return nil
 }
 
-const (
-	// nomic-embed-text has a high noise floor (~0.7 for unrelated sentences).
-	similarThreshold = 0.78
-	similarLimit     = 4
-)
+// similarLimit is the maximum number of similar entries returned by remember.
+const similarLimit = 4
 
 func (a *app) embedDocs(ctx context.Context, content string) ([]store.ChunkInput, error) {
 	parts := chunk.Split(content, a.cfg.ChunkSize, a.cfg.ChunkOverlap)
@@ -206,7 +203,7 @@ func (a *app) remember(ctx context.Context, _ *mcp.CallToolRequest, in rememberI
 	}
 	out := rememberOut{ID: res.ID, Superseded: nonNilIDs(res.Superseded), Similar: []similarOut{}}
 	for _, c := range cands {
-		if c.Similarity < similarThreshold {
+		if c.Similarity < a.cfg.SimilarMin {
 			continue
 		}
 		out.Similar = append(out.Similar, similarOut{c.ID, c.Title, c.Project, round3(c.Similarity), snippet(c.Content, 300)})

@@ -30,9 +30,6 @@ const (
 	maxEntryRunes  = 420 // truncation per entry in the context
 )
 
-// DefaultMinSim is the minimum cosine similarity of a hit (see KB_HOOK_MIN_SIM).
-const DefaultMinSim = 0.67
-
 type Deps struct {
 	Store       *store.Store
 	Embed       *embed.Client

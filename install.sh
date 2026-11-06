@@ -144,6 +144,8 @@ if [ "$PROVIDER" = openai ]; then
   set_env EMBEDDING_BASE_URL "https://api.openai.com/v1"
   set_env EMBEDDING_MODEL "text-embedding-3-small"
   set_env EMBEDDING_DIM "1536"
+  set_env EMBEDDING_DOC_PREFIX ""
+  set_env EMBEDDING_QUERY_PREFIX ""
   set_env EMBEDDING_API_KEY "$OPENAI_API_KEY"
   NO_OLLAMA=1
 fi
@@ -158,7 +160,7 @@ fi
 
 # ---------- Embedding model ----------
 if [ "$NO_OLLAMA" = 0 ]; then
-  model="$(get_env EMBEDDING_MODEL)"; model="${model:-nomic-embed-text}"
+  model="$(get_env EMBEDDING_MODEL)"; model="${model:-bge-m3}"
   if have ollama; then
     if ollama list 2>/dev/null | awk 'NR>1{print $1}' | grep -qE "^${model}(:|$)"; then
       say "Ollama model $model is already available"

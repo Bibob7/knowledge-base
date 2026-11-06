@@ -16,15 +16,17 @@ import (
 )
 
 const (
-	minUserMsgs   = 3      // shorter sessions are not worth evaluating
-	minTextRunes  = 800    // likewise very short logs
-	maxTextRunes  = 100000 // upper limit for the log in the model call
-	maxFacts      = 8
-	minFactRunes  = 15
-	maxFactRunes  = 1200
-	dupThreshold  = 0.92 // from here on a fact counts as already known
-	conflictFloor = 0.78 // from here on a model verdict (add/skip/supersede) is requested
-	AutoTag       = "auto"
+	minUserMsgs  = 3      // shorter sessions are not worth evaluating
+	minTextRunes = 800    // likewise very short logs
+	maxTextRunes = 100000 // upper limit for the log in the model call
+	maxFacts     = 8
+	minFactRunes = 15
+	maxFactRunes = 1200
+	// Only near-verbatim copies count as known without asking the model. Contradictions and
+	// paraphrases are indistinguishable by similarity (both 0.89-0.96 for bge-m3 and nomic),
+	// so everything between the model's "similar" threshold and this value gets a verdict.
+	dupThreshold = 0.98
+	AutoTag      = "auto"
 )
 
 // Fact is a knowledge entry proposed by the model.
@@ -47,7 +49,9 @@ type Deps struct {
 	DocPrefix string
 	Runner    Runner
 	StateDir  string
-	Logf      func(format string, a ...any)
+	// ConflictFloor is the similarity from which a model verdict (add/skip/supersede) is requested.
+	ConflictFloor float64
+	Logf          func(format string, a ...any)
 }
 
 // Run evaluates a transcript and stores new knowledge.
@@ -118,14 +122,14 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 			return err
 		}
 		c := &candidate{fact: f, project: project, vec: vecs[0]}
-		switch classify(sims) {
+		switch classify(sims, d.ConflictFloor) {
 		case actionSkip:
 			d.Logf("known (similarity %.2f to #%d): %.80s", sims[0].Similarity, sims[0].ID, f.Content)
 		case actionAdd:
 			ready = append(ready, c)
 		default:
 			for _, s := range sims {
-				if s.Similarity >= conflictFloor {
+				if s.Similarity >= d.ConflictFloor {
 					c.similar = append(c.similar, s)
 				}
 			}
@@ -188,7 +192,7 @@ const (
 )
 
 // classify decides based on the similarity to existing entries.
-func classify(sims []store.SimilarEntry) action {
+func classify(sims []store.SimilarEntry, conflictFloor float64) action {
 	if len(sims) == 0 {
 		return actionAdd
 	}

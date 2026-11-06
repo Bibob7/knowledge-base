@@ -104,13 +104,19 @@ func TestSanitizeAndValidate(t *testing.T) {
 
 func TestClassify(t *testing.T) {
 	mk := func(s float64) []store.SimilarEntry { return []store.SimilarEntry{{ID: 1, Similarity: s}} }
-	if classify(nil) != actionAdd || classify(mk(0.5)) != actionAdd {
+	if classify(nil, 0.78) != actionAdd || classify(mk(0.5), 0.78) != actionAdd {
 		t.Error("low similarity must be add")
 	}
-	if classify(mk(0.85)) != actionJudge {
+	if classify(mk(0.85), 0.78) != actionJudge {
 		t.Error("medium similarity must request a verdict")
 	}
-	if classify(mk(0.95)) != actionSkip {
+	if classify(mk(0.95), 0.78) != actionJudge {
+		t.Error("a paraphrase or contradiction (0.95) must get a verdict, not be discarded")
+	}
+	if classify(mk(0.72), 0.70) != actionJudge {
+		t.Error("the floor is configurable")
+	}
+	if classify(mk(0.99), 0.78) != actionSkip {
 		t.Error("high similarity is a duplicate")
 	}
 }

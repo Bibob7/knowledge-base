@@ -7,6 +7,19 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-kb}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kb}
       POSTGRES_DB: ${POSTGRES_DB:-knowledge_base}
+    # Parallel index builds use /dev/shm, which is only 64 MB in Docker by default
+    # ("could not resize shared memory segment ... No space left on device").
+    shm_size: ${POSTGRES_SHM_SIZE:-1gb}
+    # Postgres defaults (128 MB shared_buffers, 64 MB maintenance_work_mem) are far too
+    # small once the knowledge base grows: the HNSW index should fit in memory.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-512MB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-512MB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-2GB}
     ports:
       # Reachable locally only. 5433 so it does not clash with a local Postgres.
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"

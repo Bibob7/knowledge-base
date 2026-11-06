@@ -22,6 +22,41 @@ type Config struct {
 
 	ChunkSize    int
 	ChunkOverlap int
+
+	// Similarity thresholds (cosine). They depend on the embedding model; see profiles.
+	HookMinSim float64 // minimum similarity for the retrieval hook to inject an entry
+	SimilarMin float64 // from here on an existing entry counts as "similar" to a new fact
+}
+
+// profile holds the model-specific defaults. The thresholds were measured on the
+// real knowledge base (noise ceiling for off-topic prompts vs. matching entries).
+type profile struct {
+	dim                    int
+	docPrefix, queryPrefix string
+	hookMinSim, similarMin float64
+}
+
+// profiles are matched by model name prefix (longest first is not needed: keys are distinct).
+var profiles = map[string]profile{
+	// off-topic prompts <= 0.483, matching entries mostly > 0.5; related facts 0.74-0.77
+	"bge-m3": {dim: 1024, hookMinSim: 0.52, similarMin: 0.70},
+	// off-topic prompts <= 0.683, matching entries 0.67-0.77; contradicting facts ~0.94
+	"nomic-embed-text": {dim: 768, docPrefix: "search_document: ", queryPrefix: "search_query: ", hookMinSim: 0.67, similarMin: 0.78},
+	"qwen3-embedding":  {hookMinSim: 0.55, similarMin: 0.70},
+	"embeddinggemma":   {dim: 768, docPrefix: "title: none | text: ", queryPrefix: "task: search result | query: ", hookMinSim: 0.65, similarMin: 0.78},
+}
+
+// unknownProfile is used for models without a measured profile. Calibrate it yourself
+// (KB_HOOK_DEBUG=1 prints similarities) and override via KB_HOOK_MIN_SIM / KB_SIMILAR_MIN_SIM.
+var unknownProfile = profile{hookMinSim: 0.60, similarMin: 0.75}
+
+func profileFor(model string) profile {
+	for name, p := range profiles {
+		if strings.HasPrefix(model, name) {
+			return p
+		}
+	}
+	return unknownProfile
 }
 
 // LoadDotEnv reads a .env file and only sets variables that are not already set in
@@ -68,22 +103,33 @@ func LoadDotEnv() error {
 }
 
 func Load() (Config, error) {
+	model := env("EMBEDDING_MODEL", "bge-m3")
+	prof := profileFor(model)
 	c := Config{
 		DatabaseURL:          env("DATABASE_URL", "postgres://kb:kb@localhost:5433/knowledge_base?sslmode=disable"),
 		EmbeddingBaseURL:     env("EMBEDDING_BASE_URL", "http://localhost:11434/v1"),
-		EmbeddingModel:       env("EMBEDDING_MODEL", "nomic-embed-text"),
+		EmbeddingModel:       model,
 		EmbeddingAPIKey:      os.Getenv("EMBEDDING_API_KEY"),
-		EmbeddingDocPrefix:   prefixEnv("EMBEDDING_DOC_PREFIX", "search_document: "),
-		EmbeddingQueryPrefix: prefixEnv("EMBEDDING_QUERY_PREFIX", "search_query: "),
+		EmbeddingDocPrefix:   prefixEnv("EMBEDDING_DOC_PREFIX", prof.docPrefix),
+		EmbeddingQueryPrefix: prefixEnv("EMBEDDING_QUERY_PREFIX", prof.queryPrefix),
 	}
 	var err error
-	if c.EmbeddingDim, err = envInt("EMBEDDING_DIM", 768); err != nil {
+	if c.EmbeddingDim, err = envInt("EMBEDDING_DIM", prof.dim); err != nil {
 		return c, err
+	}
+	if c.EmbeddingDim == 0 {
+		return c, fmt.Errorf("EMBEDDING_DIM must be set for model %q (no known default)", model)
 	}
 	if c.ChunkSize, err = envInt("CHUNK_SIZE", 1200); err != nil {
 		return c, err
 	}
 	if c.ChunkOverlap, err = envInt("CHUNK_OVERLAP", 150); err != nil {
+		return c, err
+	}
+	if c.HookMinSim, err = envFloat("KB_HOOK_MIN_SIM", prof.hookMinSim); err != nil {
+		return c, err
+	}
+	if c.SimilarMin, err = envFloat("KB_SIMILAR_MIN_SIM", prof.similarMin); err != nil {
 		return c, err
 	}
 	if c.EmbeddingDim <= 0 || c.ChunkSize <= 0 || c.ChunkOverlap < 0 || c.ChunkOverlap >= c.ChunkSize {
@@ -93,17 +139,13 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// prefixEnv reads an embedding prefix. If unset, nomic-embed-text expects
-// "search_document: " / "search_query: " (better matches), other models none.
+// prefixEnv reads an embedding prefix; if unset, the model profile's default applies.
 // Explicitly set to empty means: no prefix.
-func prefixEnv(key, nomicDefault string) string {
+func prefixEnv(key, def string) string {
 	if v, ok := os.LookupEnv(key); ok {
 		return v
 	}
-	if strings.HasPrefix(env("EMBEDDING_MODEL", "nomic-embed-text"), "nomic-embed-text") {
-		return nomicDefault
-	}
-	return ""
+	return def
 }
 
 func env(key, def string) string {
@@ -123,4 +165,16 @@ func envInt(key string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return n, nil
+}
+
+func envFloat(key string, def float64) (float64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return f, nil
 }

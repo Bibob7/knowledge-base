@@ -14,8 +14,9 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
-	dim  int
+	pool  *pgxpool.Pool
+	dim   int
+	model string
 }
 
 // OpenReadOnly connects without running migrations (fast, for hooks).
@@ -31,11 +32,14 @@ func OpenReadOnly(ctx context.Context, url string, dim int) (*Store, error) {
 	return &Store{pool: pool, dim: dim}, nil
 }
 
-func Open(ctx context.Context, url string, dim int) (*Store, error) {
+// Open connects, runs the migrations and verifies that the database was embedded
+// with the configured model and dimension.
+func Open(ctx context.Context, url string, dim int, model string) (*Store, error) {
 	s, err := OpenReadOnly(ctx, url, dim)
 	if err != nil {
 		return nil, err
 	}
+	s.model = normalizeModel(model)
 	pool := s.pool
 	if err := s.migrate(ctx); err != nil {
 		pool.Close()
@@ -49,6 +53,7 @@ func (s *Store) Close() { s.pool.Close() }
 func (s *Store) migrate(ctx context.Context) error {
 	stmts := []string{
 		`CREATE EXTENSION IF NOT EXISTS vector`,
+		`CREATE TABLE IF NOT EXISTS kb_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS documents (
 			id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 			title      TEXT        NOT NULL,
@@ -91,10 +96,28 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	if typmod != s.dim {
 		return fmt.Errorf("EMBEDDING_DIM=%d, but the database was created with dimension %d "+
-			"(switching models requires a new schema/re-indexing)", s.dim, typmod)
+			"(switching models requires re-embedding: run 'knowledge-base-mcp reindex')", s.dim, typmod)
+	}
+	// The model must match too: vectors of different models are not comparable even
+	// if the dimension is the same.
+	var stored string
+	err = s.pool.QueryRow(ctx, `SELECT value FROM kb_meta WHERE key = 'embedding_model'`).Scan(&stored)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		// Databases from before this check: assume the configured model.
+		_, err = s.pool.Exec(ctx, `INSERT INTO kb_meta (key, value) VALUES ('embedding_model', $1)
+			ON CONFLICT (key) DO NOTHING`, s.model)
+		return err
+	case err != nil:
+		return fmt.Errorf("checking embedding model: %w", err)
+	case normalizeModel(stored) != s.model:
+		return fmt.Errorf("the database was embedded with model %q but %q is configured "+
+			"(run 'knowledge-base-mcp reindex' to re-embed everything with the configured model)", stored, s.model)
 	}
 	return nil
 }
+
+func normalizeModel(m string) string { return strings.TrimSuffix(strings.TrimSpace(m), ":latest") }
 
 // ChunkInput is a piece of text together with its embedding.
 type ChunkInput struct {
@@ -237,15 +260,37 @@ func (s *Store) Similar(ctx context.Context, embedding []float32, project string
 	if exclude == nil {
 		exclude = []int64{} // nil would be encoded as NULL and filter out all rows
 	}
-	rows, err := s.pool.Query(ctx, `
+	// With a project the candidate set is small, so it is filtered first and sorted
+	// exactly. Filtering after an HNSW scan would silently drop most results (see Search).
+	const scoped = `
+WITH cand AS MATERIALIZED (
+	SELECT d.id AS doc_id, d.title, COALESCE(d.project, '') AS project, d.kind, c.content, c.embedding
+	FROM chunks c JOIN documents d ON d.id = c.document_id
+	WHERE d.status = 'active' AND (d.project IS NULL OR d.project = $2)
+	  AND NOT (d.id = ANY($3::bigint[]))
+)
+SELECT doc_id, title, project, kind, content, 1 - (embedding <=> $1::vector) AS sim
+FROM cand ORDER BY embedding <=> $1::vector LIMIT 20`
+	// Same parameters as the scoped variant; the project condition is always true here
+	// (the project is NULL).
+	const unscoped = `
 SELECT d.id, d.title, COALESCE(d.project, ''), d.kind, c.content,
        1 - (c.embedding <=> $1::vector) AS sim
 FROM chunks c JOIN documents d ON d.id = c.document_id
-WHERE d.status = 'active'
-  AND ($2::text IS NULL OR d.project IS NULL OR d.project = $2)
+WHERE d.status = 'active' AND ($2::text IS NULL OR d.project IS NULL OR d.project = $2)
   AND NOT (d.id = ANY($3::bigint[]))
 ORDER BY c.embedding <=> $1::vector
-LIMIT 20`, vectorLiteral(embedding), nilIfEmpty(project), exclude)
+LIMIT 20`
+	q, useIndex := unscoped, true
+	if project != "" {
+		q, useIndex = scoped, false
+	}
+	tx, err := s.beginRead(ctx, useIndex)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	rows, err := tx.Query(ctx, q, vectorLiteral(embedding), nilIfEmpty(project), exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -269,6 +314,25 @@ LIMIT 20`, vectorLiteral(embedding), nilIfEmpty(project), exclude)
 	return out, rows.Err()
 }
 
+// beginRead starts a read transaction. If the query will use the HNSW index, iterative
+// scans are enabled so that filters applied after the index scan (e.g. status) cannot
+// leave the result short (pgvector >= 0.8.0; unknown settings are ignored by older versions).
+func (s *Store) beginRead(ctx context.Context, useIndex bool) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if useIndex {
+		for _, q := range []string{"SET LOCAL hnsw.iterative_scan = relaxed_order", "SET LOCAL hnsw.ef_search = 100"} {
+			if _, err := tx.Exec(ctx, q); err != nil {
+				tx.Rollback(ctx) //nolint:errcheck
+				return nil, err
+			}
+		}
+	}
+	return tx, nil
+}
+
 type SearchHit struct {
 	DocumentID int64
 	Title      string
@@ -283,11 +347,41 @@ type SearchHit struct {
 }
 
 // Search combines vector and full-text search via Reciprocal Rank Fusion.
+//
+// pgvector applies WHERE filters after the approximate HNSW scan. With many
+// projects that silently drops most results (measured on 150k chunks / 150 projects:
+// 8.9 of 50 rows, recall 0.18). So whenever a project or tag filter is present, the
+// matching rows are selected first and sorted exactly (4.9 ms in the same benchmark,
+// recall 1.0). Without such a filter the HNSW index is used with iterative scans.
 func (s *Store) Search(ctx context.Context, query string, embedding []float32, project string, tags []string, limit int) ([]SearchHit, error) {
 	if len(tags) == 0 {
 		tags = nil
 	}
-	const q = `
+	const tail = `
+SELECT d.id, d.title, COALESCE(d.source, ''), COALESCE(d.project, ''), d.kind, d.tags, c.idx, c.content,
+       COALESCE(1.0 / (60 + vec.rnk), 0) + COALESCE(1.0 / (60 + fts.rnk), 0) AS score,
+       1 - (c.embedding <=> $1::vector) AS sim
+FROM vec FULL OUTER JOIN fts ON vec.id = fts.id
+JOIN chunks c ON c.id = COALESCE(vec.id, fts.id)
+JOIN documents d ON d.id = c.document_id
+ORDER BY score DESC
+LIMIT $4`
+	const scoped = `
+WITH cand AS MATERIALIZED (
+	SELECT c.id, c.embedding, c.tsv
+	FROM chunks c JOIN documents d ON d.id = c.document_id
+	WHERE d.status = 'active' AND ($3::text[] IS NULL OR d.tags && $3::text[])
+	  AND ($5::text IS NULL OR d.project IS NULL OR d.project = $5)
+), vec AS (
+	SELECT id, ROW_NUMBER() OVER (ORDER BY dist) AS rnk
+	FROM (SELECT id, embedding <=> $1::vector AS dist FROM cand ORDER BY dist LIMIT 50) v
+), fts AS (
+	SELECT id, ROW_NUMBER() OVER (ORDER BY rank DESC) AS rnk
+	FROM (SELECT cand.id, ts_rank_cd(cand.tsv, wq.q) AS rank
+	      FROM cand, websearch_to_tsquery('simple', $2) AS wq(q)
+	      WHERE cand.tsv @@ wq.q ORDER BY rank DESC LIMIT 50) f
+)` + tail
+	const unscoped = `
 WITH vec AS (
 	SELECT c.id, ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector) AS rnk
 	FROM chunks c JOIN documents d ON d.id = c.document_id
@@ -303,16 +397,19 @@ WITH vec AS (
 	  AND ($5::text IS NULL OR d.project IS NULL OR d.project = $5)
 	ORDER BY ts_rank_cd(c.tsv, wq.q) DESC
 	LIMIT 50
-)
-SELECT d.id, d.title, COALESCE(d.source, ''), COALESCE(d.project, ''), d.kind, d.tags, c.idx, c.content,
-       COALESCE(1.0 / (60 + vec.rnk), 0) + COALESCE(1.0 / (60 + fts.rnk), 0) AS score,
-       1 - (c.embedding <=> $1::vector) AS sim
-FROM vec FULL OUTER JOIN fts ON vec.id = fts.id
-JOIN chunks c ON c.id = COALESCE(vec.id, fts.id)
-JOIN documents d ON d.id = c.document_id
-ORDER BY score DESC
-LIMIT $4`
-	rows, err := s.pool.Query(ctx, q, vectorLiteral(embedding), query, tags, limit, nilIfEmpty(project))
+)` + tail
+	q, useIndex := unscoped, true
+	if project != "" || tags != nil {
+		q, useIndex = scoped, false
+	}
+	tx, err := s.beginRead(ctx, useIndex)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	// Both variants take the same parameters. In the unscoped variant the project/tag
+	// conditions are always true (both are NULL there).
+	rows, err := tx.Query(ctx, q, vectorLiteral(embedding), query, tags, limit, nilIfEmpty(project))
 	if err != nil {
 		return nil, err
 	}
