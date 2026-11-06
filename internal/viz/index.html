@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knowledge Base</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+  --accent: #2f6fed; --warn: #b45309;
+  --c0: #2f6fed; --c1: #d9480f; --c2: #2b8a3e; --c3: #9c36b5; --c4: #0c8599; --c5: #c2255c; --c6: #a67c00; --c7: #5c7cfa;
+  --global: #868e96;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141413; --panel: #1e1e1c; --text: #ececE8; --muted: #9a9a93; --line: #34342f;
+    --accent: #6c9bff; --warn: #f0a04b;
+    --c0: #6c9bff; --c1: #ff8c5a; --c2: #5fd07a; --c3: #cf8bea; --c4: #4fd1e0; --c5: #f783ac; --c6: #e8c04a; --c7: #91a7ff;
+    --global: #adb5bd;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+.sub { color: var(--muted); font-size: 12px; }
+.spacer { flex: 1; }
+label.toggle { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.card, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.card .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.card .l { color: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+@media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+.panel { margin-bottom: 16px; }
+.grid2 .panel { margin-bottom: 0; }
+svg { display: block; width: 100%; height: auto; }
+svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+.axis { stroke: var(--line); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.mapwrap { position: relative; }
+#tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 320px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.18); display: none; z-index: 5; }
+#tip b { display: block; margin-bottom: 2px; }
+.pt { cursor: pointer; transition: opacity .15s; }
+.pt.dim { opacity: .12; }
+.sel { stroke: var(--text); stroke-width: 2.5; }
+.edge { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+input, select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+input[type=search] { flex: 1; min-width: 180px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; white-space: nowrap; }
+tr.row { cursor: pointer; }
+tr.row:hover td, tr.row.on td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+tr.old td { color: var(--muted); }
+.tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); margin-right: 4px; }
+.badge-old { color: var(--warn); border-color: var(--warn); }
+#detail { white-space: pre-wrap; word-break: break-word; }
+#detail .meta { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.empty { color: var(--muted); padding: 24px 0; text-align: center; }
+.err { color: var(--warn); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Knowledge Base</h1>
+    <span class="sub" id="status">loading…</span>
+    <span class="spacer"></span>
+    <label class="toggle"><input type="checkbox" id="auto" checked> live (every 10 s)</label>
+  </header>
+
+  <section class="cards" id="cards"></section>
+
+  <section class="grid2">
+    <div class="panel"><h2>Growth</h2><div id="growth"></div></div>
+    <div class="panel"><h2>Entries per project</h2><div id="bars"></div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Knowledge map</h2>
+    <div class="sub" style="margin-bottom:8px">Entries placed by semantic similarity (PCA of the embeddings): close points are about similar things. Hollow points are outdated; dashed lines lead to the entry that replaced them.</div>
+    <div class="mapwrap"><svg id="map" viewBox="0 0 900 520" role="img" aria-label="Knowledge map"></svg><div id="tip"></div></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Entries</h2>
+    <div class="controls">
+      <input type="search" id="q" placeholder="Filter by text, tag or id…">
+      <select id="fproject"></select>
+      <select id="fstatus"><option value="active">active</option><option value="all">all</option><option value="superseded">outdated</option></select>
+    </div>
+    <div style="overflow-x:auto"><table id="tbl"><thead><tr>
+      <th data-k="id">#</th><th data-k="project">Project</th><th data-k="title">Entry</th><th data-k="tags">Tags</th><th data-k="createdAt">Created</th>
+    </tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="panel" id="detailpanel" hidden>
+    <h2>Selected entry</h2>
+    <div id="detail"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") e.className = v; else e.setAttribute(k, v); }
+  for (const c of kids) e.append(c);
+  return e;
+}
+function sv(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+let data = null, selected = null, sortKey = "id", sortDir = -1, lastSig = "";
+const state = { q: "", project: "*", status: "active" };
+
+function projectColor(p) {
+  if (!p) return "var(--global)";
+  const i = data.projects.indexOf(p);
+  return "var(--c" + (i % 8) + ")";
+}
+const projLabel = (p) => p || "(global)";
+const fmtDate = (s) => new Date(s).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+function fmtBytes(n) {
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+  if (n < 1024 ** 3) return (n / 1024 / 1024).toFixed(1) + " MB";
+  return (n / 1024 ** 3).toFixed(2) + " GB";
+}
+
+// forMap: the map always shows outdated entries (as history) unless the filter asks for them only.
+function matches(d, forMap) {
+  if (state.status === "active" && d.status !== "active" && !forMap) return false;
+  if (state.status === "superseded" && d.status === "active") return false;
+  if (state.project !== "*" && projLabel(d.project) !== state.project) return false;
+  const q = state.q.trim().toLowerCase();
+  if (q) {
+    const hay = (d.id + " " + d.title + " " + d.content + " " + d.tags.join(" ")).toLowerCase();
+    if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
+  }
+  return true;
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/data", { cache: "no-store" });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    const sig = d.docs.map((x) => x.id + ":" + x.status + ":" + x.updatedAt).join("|") + d.dbBytes;
+    data = d;
+    $("status").className = "sub";
+    $("status").textContent = "updated " + new Date(d.generatedAt).toLocaleTimeString() + " · model " + (d.model || "?");
+    if (sig !== lastSig) { lastSig = sig; render(); }
+  } catch (e) {
+    $("status").className = "sub err";
+    $("status").textContent = "Cannot reach the knowledge base: " + e.message;
+  }
+}
+
+function render() {
+  const active = data.docs.filter((d) => d.status === "active");
+  const old = data.docs.length - active.length;
+  const projects = new Set(active.map((d) => projLabel(d.project)));
+  const cards = [
+    [active.length, "active entries"], [old, "outdated (history)"],
+    [projects.size, "projects (incl. global)"], [fmtBytes(data.dbBytes), "database size"],
+  ];
+  const c = $("cards"); c.replaceChildren();
+  for (const [v, l] of cards) c.append(el("div", { class: "card" }, el("div", { class: "v" }, String(v)), el("div", { class: "l" }, l)));
+  if (data.total > data.shown) c.append(el("div", { class: "card" }, el("div", { class: "v" }, String(data.total)), el("div", { class: "l" }, "total (showing newest " + data.shown + ")")));
+
+  // project filter options
+  const sel = $("fproject"), cur = state.project;
+  sel.replaceChildren(el("option", { value: "*" }, "all projects"));
+  for (const p of ["(global)", ...data.projects]) sel.append(el("option", { value: p }, p));
+  sel.value = [...sel.options].some((o) => o.value === cur) ? cur : "*";
+  state.project = sel.value;
+
+  drawGrowth(); drawBars(); drawMap(); drawTable(); drawDetail();
+}
+
+function drawGrowth() {
+  const host = $("growth"); host.replaceChildren();
+  const ev = [];
+  for (const d of data.docs) {
+    ev.push([new Date(d.createdAt).getTime(), 1, 1]);
+    if (d.status !== "active") ev.push([new Date(d.updatedAt).getTime(), 0, -1]);
+  }
+  if (!ev.length) { host.append(el("div", { class: "empty" }, "No entries yet")); return; }
+  ev.sort((a, b) => a[0] - b[0]);
+  let tot = 0, act = 0;
+  const pts = ev.map(([t, dt, da]) => { tot += dt; act += da; return [t, tot, act]; });
+  const W = 520, H = 220, L = 34, R = 10, T = 10, B = 24;
+  const t0 = pts[0][0], t1 = Math.max(pts[pts.length - 1][0], t0 + 3600e3);
+  const ymax = Math.max(...pts.map((p) => p[1]), 1);
+  const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), Y = (v) => T + (1 - v / ymax) * (H - T - B);
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Growth over time" });
+  for (let i = 0; i <= 4; i++) {
+    const v = Math.round((ymax * i) / 4), y = Y(v);
+    svg.append(sv("line", { x1: L, x2: W - R, y1: y, y2: y, class: "axis" }), sv("text", { x: L - 6, y: y + 4, "text-anchor": "end" }, String(v)));
+  }
+  svg.append(sv("text", { x: L, y: H - 6 }, fmtDate(t0)), sv("text", { x: W - R, y: H - 6, "text-anchor": "end" }, fmtDate(t1)));
+  const path = (idx) => {
+    let s = `M${X(t0)},${Y(0)}`, prev = 0;
+    for (const p of pts) { s += ` L${X(p[0])},${Y(prev)} L${X(p[0])},${Y(p[idx])}`; prev = p[idx]; }
+    return s + ` L${X(t1)},${Y(prev)}`;
+  };
+  svg.append(sv("path", { d: path(1), fill: "none", stroke: "var(--muted)", "stroke-width": 1.5, "stroke-dasharray": "4 3" }));
+  svg.append(sv("path", { d: path(2), fill: "none", stroke: "var(--accent)", "stroke-width": 2 }));
+  host.append(svg, el("div", { class: "legend" },
+    el("span", {}, el("span", { class: "dot", style: "background:var(--accent)" }), "active"),
+    el("span", {}, el("span", { class: "dot", style: "background:var(--muted)" }), "all entries ever (incl. outdated)")));
+}
+
+function drawBars() {
+  const host = $("bars"); host.replaceChildren();
+  const by = new Map();
+  for (const d of data.docs) {
+    const k = projLabel(d.project);
+    if (!by.has(k)) by.set(k, { a: 0, o: 0, p: d.project });
+    by.get(k)[d.status === "active" ? "a" : "o"]++;
+  }
+  if (!by.size) { host.append(el("div", { class: "empty" }, "No entries yet")); return; }
+  const rows = [...by.entries()].sort((x, y) => y[1].a + y[1].o - (x[1].a + x[1].o));
+  const max = Math.max(...rows.map(([, v]) => v.a + v.o), 1);
+  const rh = 26, W = 520, L = 150, H = rows.length * rh + 6;
+  const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Entries per project" });
+  rows.forEach(([name, v], i) => {
+    const y = i * rh + 4, wa = ((W - L - 110) * v.a) / max, wo = ((W - L - 110) * v.o) / max;
+    svg.append(sv("text", { x: L - 8, y: y + 14, "text-anchor": "end" }, name.length > 22 ? name.slice(0, 21) + "…" : name));
+    svg.append(sv("rect", { x: L, y, width: Math.max(wa, v.a ? 2 : 0), height: 18, rx: 3, fill: projectColor(v.p) }));
+    if (v.o) svg.append(sv("rect", { x: L + wa, y, width: wo, height: 18, rx: 3, fill: projectColor(v.p), opacity: 0.3 }));
+    svg.append(sv("text", { x: L + wa + wo + 6, y: y + 14 }, v.a + (v.o ? " + " + v.o + " old" : "")));
+  });
+  host.append(svg);
+}
+
+function drawMap() {
+  const svg = $("map"); svg.replaceChildren();
+  const W = 900, H = 520, P = 36;
+  const X = (x) => P + ((x + 1) / 2) * (W - 2 * P), Y = (y) => P + ((1 - (y + 1) / 2)) * (H - 2 * P);
+  const byId = new Map(data.docs.map((d) => [d.id, d]));
+  const tip = $("tip");
+  const edges = sv("g", {}), pts = sv("g", {});
+  for (const d of data.docs) {
+    if (d.supersededBy && byId.has(d.supersededBy)) {
+      const n = byId.get(d.supersededBy);
+      edges.append(sv("line", { x1: X(d.x), y1: Y(d.y), x2: X(n.x), y2: Y(n.y), class: "edge" }));
+    }
+  }
+  for (const d of data.docs) {
+    const on = d.status === "active";
+    const c = sv("circle", {
+      cx: X(d.x), cy: Y(d.y), r: on ? 7 : 5.5, class: "pt" + (matches(d, true) ? "" : " dim") + (selected === d.id ? " sel" : ""),
+      fill: on ? projectColor(d.project) : "var(--panel)", stroke: projectColor(d.project), "stroke-width": on ? 0 : 2,
+    });
+    if (selected === d.id) c.setAttribute("stroke", "var(--text)");
+    c.addEventListener("mousemove", (e) => {
+      const box = svg.parentElement.getBoundingClientRect();
+      tip.replaceChildren(el("b", {}, "#" + d.id + " · " + projLabel(d.project) + (on ? "" : " · outdated")), d.title);
+      tip.style.display = "block";
+      tip.style.left = Math.min(e.clientX - box.left + 12, box.width - 330) + "px";
+      tip.style.top = e.clientY - box.top + 14 + "px";
+    });
+    c.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+    c.addEventListener("click", () => select(d.id));
+    pts.append(c);
+  }
+  svg.append(edges, pts);
+  const lg = $("legend"); lg.replaceChildren();
+  for (const p of ["", ...data.projects]) lg.append(el("span", {}, el("span", { class: "dot", style: "background:" + projectColor(p) }), projLabel(p)));
+}
+
+function drawTable() {
+  const body = $("tbl").tBodies[0]; body.replaceChildren();
+  const rows = data.docs.filter(matches);
+  const val = (d) => sortKey === "tags" ? d.tags.join(",") : sortKey === "project" ? projLabel(d.project) : d[sortKey];
+  rows.sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sortDir);
+  if (!rows.length) { body.append(el("tr", {}, el("td", { colspan: 5, class: "empty" }, "No entries match"))); return; }
+  for (const d of rows) {
+    const tr = el("tr", { class: "row" + (d.status !== "active" ? " old" : "") + (selected === d.id ? " on" : "") });
+    tr.append(el("td", {}, String(d.id)),
+      el("td", {}, el("span", { class: "dot", style: "background:" + projectColor(d.project) + ";margin-right:6px" }), projLabel(d.project)));
+    const t = el("td", {}, d.title);
+    if (d.status !== "active") t.append(" ", el("span", { class: "tag badge-old" }, "outdated"));
+    tr.append(t, el("td", {}, ...d.tags.map((x) => el("span", { class: "tag" }, x))), el("td", {}, fmtDate(d.createdAt)));
+    tr.addEventListener("click", () => select(d.id));
+    body.append(tr);
+  }
+}
+
+function drawDetail() {
+  const panel = $("detailpanel"), box = $("detail");
+  const d = data.docs.find((x) => x.id === selected);
+  if (!d) { panel.hidden = true; return; }
+  panel.hidden = false; box.replaceChildren();
+  const meta = el("div", { class: "meta" }, `#${d.id} · ${projLabel(d.project)} · ${d.kind} · ${d.status} · created ${fmtDate(d.createdAt)}`);
+  box.append(meta);
+  const link = (id, prefix) => {
+    const a = el("span", { class: "link" }, prefix + " #" + id);
+    a.addEventListener("click", () => select(id));
+    return a;
+  };
+  if (d.supersededBy) meta.append(" · ", link(d.supersededBy, "replaced by"));
+  const prev = data.docs.filter((x) => x.supersededBy === d.id);
+  for (const p of prev) meta.append(" · ", link(p.id, "replaces"));
+  box.append(d.content);
+}
+
+function select(id) {
+  selected = selected === id ? null : id;
+  drawMap(); drawTable(); drawDetail();
+  if (selected) $("detailpanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+$("q").addEventListener("input", (e) => { state.q = e.target.value; if (data) { drawMap(); drawTable(); } });
+$("fproject").addEventListener("change", (e) => { state.project = e.target.value; drawMap(); drawTable(); });
+$("fstatus").addEventListener("change", (e) => { state.status = e.target.value; drawMap(); drawTable(); });
+for (const th of document.querySelectorAll("th[data-k]")) th.addEventListener("click", () => {
+  const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : 1; sortKey = k; drawTable();
+});
+let timer = null;
+function schedule() { clearInterval(timer); if ($("auto").checked) timer = setInterval(load, 10000); }
+$("auto").addEventListener("change", schedule);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+load(); schedule();
+</script>
+</body>
+</html>

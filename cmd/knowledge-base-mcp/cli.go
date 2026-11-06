@@ -9,7 +9,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/kevin/knowledge-base/internal/extract"
 	"github.com/kevin/knowledge-base/internal/hook"
 	"github.com/kevin/knowledge-base/internal/store"
+	"github.com/kevin/knowledge-base/internal/viz"
 )
 
 // runSubcommand runs helper commands. handled=false: start normally as an MCP server.
@@ -46,6 +50,12 @@ func runSubcommand(args []string) (handled bool, code int) {
 		return true, 0
 	case "reindex":
 		if err := runReindex(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return true, 1
+		}
+		return true, 0
+	case "viz":
+		if err := runViz(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			return true, 1
 		}
@@ -326,4 +336,44 @@ func runReindex(args []string) error {
 		Embed:     client.Embed,
 		Logf:      func(f string, a ...any) { fmt.Printf("reindex: "+f+"\n", a...) },
 	})
+}
+
+// runViz serves a live, read-only view of the knowledge base on a loopback address.
+func runViz(args []string) error {
+	fs := flag.NewFlagSet("viz", flag.ContinueOnError)
+	addr := fs.String("addr", "127.0.0.1:8765", "listen address (loopback only, there is no authentication)")
+	open := fs.Bool("open", false, "open the page in the default browser")
+	limit := fs.Int("limit", 5000, "show at most this many entries (newest first)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := config.LoadDotEnv(); err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return viz.Serve(ctx, *addr, viz.Options{Source: st, Limit: *limit}, func(a string) {
+		url := "http://" + a + "/"
+		fmt.Println("Knowledge base view: " + url + "  (Ctrl+C to stop)")
+		if *open {
+			openBrowser(url)
+		}
+	})
+}
+
+func openBrowser(url string) {
+	name := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		name = "open"
+	}
+	_ = exec.Command(name, url).Start()
 }

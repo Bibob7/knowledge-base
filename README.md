@@ -169,6 +169,19 @@ The behavior is controlled by the rules file `claude/rules/knowledge-base.md` (c
 `~/.claude/rules/` and loaded automatically by Claude Code): search first when working on a task, call
 `remember` immediately on corrections/decisions/findings, replace outdated entries via `supersede`.
 
+## Visualisation
+
+```bash
+bin/knowledge-base-mcp viz --open     # http://127.0.0.1:8765/
+```
+
+A live, read-only view of the database: key figures, growth over time, entries per project, a **knowledge map**
+(entries placed by semantic similarity via a PCA of the embeddings; hollow points are outdated, dashed lines lead to
+the entry that replaced them) and a filterable list with the full text. The page refreshes itself every 10 seconds.
+It needs no internet access (no external scripts or fonts). There is no authentication, so the server only listens on
+loopback addresses and rejects requests with a foreign `Host` header (DNS rebinding). Flags: `--addr`, `--open`,
+`--limit` (newest N entries, default 5000).
+
 ## Embedding model
 
 The default is `bge-m3` (1024 dimensions, multilingual, via Ollama). On the real knowledge base (37 entries,
