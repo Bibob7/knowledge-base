@@ -45,7 +45,7 @@ type Options struct {
 }
 
 type Deps struct {
-	Store     *store.Store
+	Store     store.Store
 	Embed     *embed.Client
 	DocPrefix string
 	Runner    Runner

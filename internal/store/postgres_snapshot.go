@@ -5,36 +5,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 )
-
-// SnapshotDoc is one entry with its text and its mean (document-level) embedding.
-type SnapshotDoc struct {
-	ID           int64
-	Title        string
-	Project      string
-	Kind         string
-	Status       string
-	SupersededBy *int64
-	Source       string
-	Tags         []string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Content      string
-	Vec          []float32
-}
-
-// Snapshot is a read-only view of the whole knowledge base for visualisation.
-type Snapshot struct {
-	Docs    []SnapshotDoc
-	Total   int // entries in the database (may exceed len(Docs) when limited)
-	Model   string
-	DBBytes int64
-}
 
 // Snapshot returns the newest `limit` entries including their document embeddings
 // (the mean of the chunk embeddings).
-func (s *Store) Snapshot(ctx context.Context, limit int) (*Snapshot, error) {
+func (s *pgStore) Snapshot(ctx context.Context, limit int) (*Snapshot, error) {
 	snap := &Snapshot{}
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM documents`).Scan(&snap.Total); err != nil {
 		return nil, err
