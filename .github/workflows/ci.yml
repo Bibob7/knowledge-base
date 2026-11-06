@@ -26,9 +26,11 @@ jobs:
       KB_TEST_DATABASE_URL: postgres://kb:kb@localhost:5432/kb_test?sslmode=disable
     steps:
       - uses: actions/checkout@v7
+      # Latest stable release, not the go.mod minimum: setup-go would install exactly that
+      # version (e.g. 1.27.0) and the binaries would miss the patch releases' security fixes.
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...

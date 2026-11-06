@@ -1,7 +1,7 @@
 {
   "name": "knowledge-base",
   "displayName": "Knowledge Base",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Persistent knowledge base that learns across sessions and projects: hybrid search on Postgres/pgvector, automatic retrieval per prompt and learning at session end",
   "author": {
     "name": "Kevin Kreitner",
