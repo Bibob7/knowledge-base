@@ -63,3 +63,26 @@ func TestServeRefusesNonLoopback(t *testing.T) {
 		t.Fatal("expected refusal for a non-loopback address")
 	}
 }
+
+func TestPing(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Handler(Options{Source: fakeSource{}}).ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:8765/api/ping", nil))
+	if rec.Code != 200 || rec.Body.String() != PingBody {
+		t.Fatalf("ping: %d %q", rec.Code, rec.Body)
+	}
+}
+
+func TestServeStopsWhenIdle(t *testing.T) {
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(context.Background(), "127.0.0.1:0", Options{Source: fakeSource{}, IdleTimeout: 200 * time.Millisecond}, nil)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("server did not stop after the idle timeout")
+	}
+}

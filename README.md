@@ -33,6 +33,7 @@ Then run `/reload-plugins` or restart Claude Code. The plugin brings everything 
 | MCP server `kb` (`.mcp.json`) | the tools below; its server instructions tell Claude when to search, remember and supersede (`cmd/knowledge-base-mcp/instructions.md`) |
 | Hooks (`hooks/hooks.json`) | retrieval per prompt, learning at session end, silent sweep of crashed sessions |
 | Skill `/knowledge-base:setup` | setup, repair and status |
+| Skill `/knowledge-base:viz` | opens the live visualisation in the default browser (see [Visualisation](#visualisation)) |
 
 `scripts/kb` is the launcher used by the MCP server and the hooks: it builds `knowledge-base-mcp` once per plugin
 version into `${CLAUDE_PLUGIN_DATA}/bin/` (`~/.claude/plugins/data/knowledge-base-cubicus/bin/`) and runs it. A hook
@@ -187,16 +188,25 @@ outdated entries via `supersede`.
 
 ## Visualisation
 
+In Claude Code: `/knowledge-base:viz` opens it in the default browser (`/knowledge-base:viz stop` stops it). From the
+shell:
+
 ```bash
-"$KB" viz --open     # http://127.0.0.1:8765/
+"$KB" viz --open             # foreground, Ctrl+C stops it; http://127.0.0.1:8765/
+"$KB" viz --detach --open    # background (reuses a running instance), what the skill runs
+"$KB" viz --stop             # stop the background instance
 ```
+
+In the background the server stops on its own 30 minutes after the last request (`--idle`); an open tab polls every
+10 seconds, background tabs at least once a minute, so it only stops after the tab was closed. The pid file and log
+are in the cache directory (`viz.pid`, `viz.log`).
 
 A live, read-only view of the database: key figures, growth over time, entries per project, a **knowledge map**
 (entries placed by semantic similarity via a PCA of the embeddings; hollow points are outdated, dashed lines lead to
 the entry that replaced them) and a filterable list with the full text. The page refreshes itself every 10 seconds.
 It needs no internet access (no external scripts or fonts). There is no authentication, so the server only listens on
 loopback addresses and rejects requests with a foreign `Host` header (DNS rebinding). Flags: `--addr`, `--open`,
-`--limit` (newest N entries, default 5000).
+`--limit` (newest N entries, default 5000), `--detach`, `--stop`, `--idle`.
 
 ## Embedding model
 

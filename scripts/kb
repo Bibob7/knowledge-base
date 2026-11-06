@@ -8,11 +8,15 @@
 #   kb hook        run the hook; if the binary is not built yet, do nothing (a hook must never block)
 #   kb --ensure    only build if needed and print the binary path
 #   kb --path      print the binary path without building
+#   kb --data DIR ...  use DIR as data directory (for skills: the Bash tool has no CLAUDE_PLUGIN_DATA)
 #
 # KB_FORCE_BUILD=1 rebuilds even if the binary for this version exists (for development).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ "${1:-}" = --data ]; then
+  CLAUDE_PLUGIN_DATA="${2:?--data needs a directory}"; shift 2
+fi
 DATA="${CLAUDE_PLUGIN_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/knowledge-base}"
 VERSION="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/.claude-plugin/plugin.json" | head -n1)"
 VERSION="${VERSION:-dev}"
