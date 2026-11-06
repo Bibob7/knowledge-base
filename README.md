@@ -133,6 +133,8 @@ triggering evaluations or hooks itself.
 | `KB_AUTO_LEARN=0` | disable the evaluation at session end (the hook stays registered but does nothing) |
 | `KB_EXTRACT_MODEL` | model used for the evaluation (default `sonnet`) |
 | `KB_CLAUDE_BIN` | path to the `claude` CLI if it is not on the `PATH` |
+| `KB_SWEEP_IDLE` / `KB_SWEEP_MAX_AGE` | idle time before a transcript is swept (default `30m`) / maximum age (default `168h`) |
+| `KB_CACHE_DIR` | directory for the log and the progress files (default: user cache dir, e.g. for tests) |
 
 Test manually without storing anything:
 
@@ -141,8 +143,25 @@ bin/knowledge-base-mcp extract --transcript ~/.claude/projects/<project>/<sessio
   --session test --project my-project --dry-run
 ```
 
-Not covered: sessions that are terminated abruptly (terminal closed, crash) may not trigger
-`SessionEnd`. On Windows the background evaluation is not implemented.
+On Windows the background evaluation is not implemented.
+
+### Sessions that never end cleanly
+
+When a terminal is closed or Claude Code crashes, `SessionEnd` never fires. A `SessionStart` hook therefore
+starts a **silent** background sweep (`bin/knowledge-base-mcp sweep`) whenever a session starts or resumes
+(not on `compact`). It prints nothing, so no knowledge is injected at session start; it only looks for
+transcripts that were never evaluated:
+
+- the transcript has not changed for 30 minutes (`KB_SWEEP_IDLE`), so sessions that are still open in another
+  window are left alone, and the session that triggered the sweep is skipped;
+- it is not older than 7 days (`KB_SWEEP_MAX_AGE`) and not older than the first sweep, so your old history is
+  never processed retroactively (the very first sweep only records its start time);
+- it was not evaluated up to its last change; resumed sessions are evaluated only from the last evaluated line;
+- at most 3 transcripts per sweep (newest first), at most one sweep per 10 minutes, one sweep at a time, and
+  one evaluation per session at a time; a session whose evaluation failed is retried after an hour.
+
+The project is taken from the working directory recorded in the transcript. Show what a sweep would do without
+storing anything: `bin/knowledge-base-mcp sweep --dry-run --force`.
 
 ## Automatic learning
 

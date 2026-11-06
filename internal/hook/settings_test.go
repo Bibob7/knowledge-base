@@ -40,7 +40,7 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	}
 	got, _ := os.ReadFile(path)
 	s := string(got)
-	for _, want := range []string{`"/other/tool"`, `rtk hook claude`, `"UserPromptSubmit"`, `"SessionEnd"`, cmd} {
+	for _, want := range []string{`"/other/tool"`, `rtk hook claude`, `"UserPromptSubmit"`, `"SessionStart"`, `"SessionEnd"`, cmd} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing after Install: %s", want)
 		}
@@ -75,7 +75,7 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	}
 }
 
-func TestInstallRemovesLegacySessionStartHook(t *testing.T) {
+func TestInstallReplacesOldOwnEntriesWithoutDuplicates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	old := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/other/tool"}]},` +
 		`{"hooks":[{"type":"command","command":"/old/knowledge-base-mcp hook","timeout":10}]}]}}`
@@ -85,10 +85,15 @@ func TestInstallRemovesLegacySessionStartHook(t *testing.T) {
 	}
 	s := string(mustRead(t, path))
 	if strings.Contains(s, "/old/knowledge-base-mcp") || !strings.Contains(s, "/other/tool") {
-		t.Errorf("SessionStart migration is wrong:\n%s", s)
+		t.Errorf("old own entry not replaced or foreign hook lost:\n%s", s)
 	}
 	if strings.Count(s, "/new/knowledge-base-mcp hook") != len(Events) {
 		t.Errorf("new hook not added exactly once per event:\n%s", s)
+	}
+	for _, ev := range Events {
+		if !strings.Contains(s, `"`+ev+`"`) {
+			t.Errorf("event %s missing", ev)
+		}
 	}
 }
 

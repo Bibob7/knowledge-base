@@ -38,6 +38,12 @@ func runSubcommand(args []string) (handled bool, code int) {
 			return true, 1
 		}
 		return true, 0
+	case "sweep":
+		if err := runSweep(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), "sweep error:", err)
+			return true, 1
+		}
+		return true, 0
 	case "reindex":
 		if err := runReindex(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -71,9 +77,20 @@ func runHook() error {
 		TranscriptPath string `json:"transcript_path"`
 		Cwd            string `json:"cwd"`
 		HookEventName  string `json:"hook_event_name"`
+		Source         string `json:"source"`
 	}
-	if json.Unmarshal(data, &peek) == nil && peek.HookEventName == "SessionEnd" {
-		return onSessionEnd(peek.TranscriptPath, peek.SessionID, peek.Cwd)
+	if json.Unmarshal(data, &peek) == nil {
+		switch peek.HookEventName {
+		case "SessionEnd":
+			return onSessionEnd(peek.TranscriptPath, peek.SessionID, peek.Cwd)
+		case "SessionStart":
+			// Silent: nothing is injected into the context. A background sweep evaluates
+			// sessions that never ended cleanly. 'compact' happens mid-session, skip it.
+			if peek.Source == "compact" {
+				return nil
+			}
+			return onSessionStart(peek.SessionID)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -132,10 +149,31 @@ func manageHooks(install bool) error {
 	return nil
 }
 
-// onSessionEnd starts the extraction in the background and returns immediately.
-func onSessionEnd(transcript, session, cwd string) error {
+// autoLearnEnabled reports whether KB_AUTO_LEARN allows evaluating transcripts.
+func autoLearnEnabled() bool {
 	switch strings.ToLower(os.Getenv("KB_AUTO_LEARN")) {
 	case "0", "off", "false", "no":
+		return false
+	}
+	return true
+}
+
+// onSessionStart starts a sweep for unevaluated transcripts in the background and returns
+// immediately. It prints nothing, so no knowledge is injected at session start.
+func onSessionStart(session string) error {
+	if !autoLearnEnabled() {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return extract.SpawnSweep(exe, session)
+}
+
+// onSessionEnd starts the extraction in the background and returns immediately.
+func onSessionEnd(transcript, session, cwd string) error {
+	if !autoLearnEnabled() {
 		return nil
 	}
 	if transcript == "" || session == "" {
@@ -167,25 +205,34 @@ func runExtract(args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	if err := config.LoadDotEnv(); err != nil {
-		return err
-	}
-	cfg, err := config.Load()
+	d, closeFn, err := newExtractDeps(ctx)
 	if err != nil {
 		return err
 	}
-	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
+	defer closeFn()
 
 	proj := *project
 	if proj == "" {
 		proj = hook.ProjectFromDir(ctx, *cwd)
 	}
+	return d.Run(ctx, extract.Options{Transcript: *transcript, SessionID: *session, Project: proj, DryRun: *dry})
+}
+
+// newExtractDeps wires the store, embedding client and model runner for evaluating transcripts.
+func newExtractDeps(ctx context.Context) (extract.Deps, func(), error) {
+	if err := config.LoadDotEnv(); err != nil {
+		return extract.Deps{}, nil, err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return extract.Deps{}, nil, err
+	}
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	if err != nil {
+		return extract.Deps{}, nil, err
+	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
-	d := extract.Deps{
+	return extract.Deps{
 		Store:         st,
 		Embed:         embed.New(cfg.EmbeddingBaseURL, cfg.EmbeddingModel, cfg.EmbeddingAPIKey, cfg.EmbeddingDim),
 		DocPrefix:     cfg.EmbeddingDocPrefix,
@@ -193,8 +240,44 @@ func runExtract(args []string) error {
 		Runner:        extract.ClaudeCLI{Model: os.Getenv("KB_EXTRACT_MODEL")},
 		StateDir:      extract.StateDir(),
 		Logf:          func(f string, a ...any) { logger.Printf("extract: "+f, a...) },
+	}, st.Close, nil
+}
+
+// runSweep evaluates transcripts of sessions that never ended cleanly (see extract.Sweep).
+// It is started by the SessionStart hook; it can also be run by hand (--dry-run, --force).
+func runSweep(args []string) error {
+	fs := flag.NewFlagSet("sweep", flag.ContinueOnError)
+	current := fs.String("current-session", "", "session that triggered the sweep (never evaluated)")
+	root := fs.String("root", "", "transcripts directory (default ~/.claude/projects)")
+	idle := fs.Duration("idle", envDuration("KB_SWEEP_IDLE", 30*time.Minute), "a transcript must have been unchanged for this long")
+	maxAge := fs.Duration("max-age", envDuration("KB_SWEEP_MAX_AGE", 7*24*time.Hour), "ignore transcripts older than this")
+	maxN := fs.Int("max", 3, "evaluate at most this many transcripts per sweep")
+	dry := fs.Bool("dry-run", false, "only show what would be stored")
+	force := fs.Bool("force", false, "ignore the minimum interval, the idle time and the failure back-off")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	return extract.Run(ctx, d, extract.Options{Transcript: *transcript, SessionID: *session, Project: proj, DryRun: *dry})
+	if !autoLearnEnabled() && !*force {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	d, closeFn, err := newExtractDeps(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	return d.Sweep(ctx, extract.SweepOptions{
+		Root: *root, CurrentSession: *current, Idle: *idle, MaxAge: *maxAge, Max: *maxN,
+		Force: *force, DryRun: *dry, ProjectOf: hook.ProjectFromDir,
+	})
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	if d, err := time.ParseDuration(os.Getenv(key)); err == nil && d > 0 {
+		return d
+	}
+	return def
 }
 
 // runReindex re-embeds all stored chunks with the configured model (see store.Reindex).

@@ -35,7 +35,8 @@ Rules for entries:
   secrets/credentials, personal data beyond work preferences.
 - After saving, mention it in one short line in the user's language (e.g. "Noted: ..."), not more.
 
-A SessionEnd hook also extracts learnings from the transcript afterwards (entries tagged `auto`). That is only a
+A SessionEnd hook also extracts learnings from the transcript afterwards (entries tagged `auto`), and a silent
+SessionStart sweep does the same for sessions that never ended cleanly (crash, closed terminal). That is only a
 safety net: still call `remember` immediately for corrections, preferences and decisions, and do not wait for it.
 
 ## Correct stale knowledge

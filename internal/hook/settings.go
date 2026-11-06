@@ -10,10 +10,11 @@ import (
 )
 
 // Events for which hooks are registered.
-var Events = []string{"UserPromptSubmit", "SessionEnd"}
+var Events = []string{"UserPromptSubmit", "SessionStart", "SessionEnd"}
 
-// legacyEvents used to have hooks of ours; Install/Uninstall clean them up.
-var legacyEvents = []string{"SessionStart"}
+// legacyEvents are events that used to have hooks of ours but no longer do; Install and
+// Uninstall clean them up. Currently none (SessionStart came back for the silent sweep).
+var legacyEvents []string
 
 const hookTimeoutSeconds = 10
 

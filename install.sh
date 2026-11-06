@@ -190,7 +190,7 @@ elif ! have claude; then
   warn "Claude Code CLI not found. Manually:"
   echo "    mkdir -p ~/.claude/rules && cp '$RULES_SRC' '$RULES_DST'"
   echo "    claude mcp add $MCP_NAME --scope user -- '$BIN'"
-  echo "    '$BIN' install-hooks    # hooks: retrieval per prompt + learning at session end (~/.claude/settings.json)"
+  echo "    '$BIN' install-hooks    # hooks: retrieval per prompt, learning at session end, recovery of crashed sessions (~/.claude/settings.json)"
 elif confirm "Copy the rules file to ~/.claude/rules/, register the MCP server and add hooks to ~/.claude/settings.json?"; then
   mkdir -p "$(dirname "$RULES_DST")"
   if [ -f "$RULES_DST" ] && ! cmp -s "$RULES_SRC" "$RULES_DST"; then
@@ -200,7 +200,7 @@ elif confirm "Copy the rules file to ~/.claude/rules/, register the MCP server a
   cp "$RULES_SRC" "$RULES_DST"
   claude mcp remove "$MCP_NAME" --scope user >/dev/null 2>&1 || true
   claude mcp add "$MCP_NAME" --scope user -- "$BIN"
-  say "Adding hooks (retrieval per prompt, learning at session end) to ~/.claude/settings.json"
+  say "Adding hooks (retrieval per prompt, learning at session end, recovery of crashed sessions) to ~/.claude/settings.json"
   "$BIN" install-hooks || warn "Could not add the hooks (later: $BIN install-hooks)"
   say "Registered. Restart Claude Code so that tools and hooks become active."
 else

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kevin/knowledge-base/internal/embed"
@@ -55,7 +56,19 @@ type Deps struct {
 }
 
 // Run evaluates a transcript and stores new knowledge.
-func Run(ctx context.Context, d Deps, o Options) error {
+func Run(ctx context.Context, d Deps, o Options) error { return d.Run(ctx, o) }
+
+// Run evaluates a transcript and stores new knowledge.
+func (d Deps) Run(ctx context.Context, o Options) error {
+	// One evaluation per session at a time (SessionEnd and sweep must not overlap).
+	if d.StateDir != "" && safeID.MatchString(o.SessionID) {
+		release, ok := acquireLock(d.StateDir, o.SessionID, sweepLockStale, time.Now())
+		if !ok {
+			d.Logf("session %s is already being evaluated", o.SessionID)
+			return nil
+		}
+		defer release()
+	}
 	from := d.loadProgress(o.SessionID)
 	f, err := os.Open(o.Transcript)
 	if err != nil {
