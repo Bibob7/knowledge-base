@@ -15,9 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Latest stable release, not the go.mod minimum: setup-go would install exactly that
+      # version (e.g. 1.27.0) and the binaries would miss the patch releases' security fixes.
       - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
       - name: Check the tag against plugin.json
         run: |
           version="$(jq -r .version .claude-plugin/plugin.json)"

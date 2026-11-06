@@ -12,7 +12,7 @@ of piling them up, and evaluates sessions afterwards as a safety net. Everything
 Prerequisites: Docker with `docker compose` and [Ollama](https://ollama.com/download). Without Docker, an existing
 Postgres with pgvector works (`--database-url`); without Ollama, OpenAI embeddings (`--embedding openai`). The server
 binary is downloaded from the [GitHub release](https://github.com/Bibob7/knowledge-base/releases) of the plugin
-version (macOS and Linux, amd64 and arm64); [Go](https://go.dev/dl/) is only needed where no release binary exists.
+version (macOS and Linux, amd64 and arm64); [Go](https://go.dev/dl/) 1.27 or newer is only needed where no release binary exists.
 
 In Claude Code:
 
