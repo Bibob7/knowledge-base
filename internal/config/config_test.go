@@ -60,3 +60,27 @@ func TestOverridesAndUnknownModel(t *testing.T) {
 		t.Errorf("unexpected config: %+v", c)
 	}
 }
+
+func TestEnvFilePathPrefersExplicitThenUserConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("KB_ENV_FILE", "")
+
+	// No user config yet: falls back to the legacy file next to the binary.
+	if p := envFilePath(); p == FilePath() {
+		t.Errorf("missing user config must not be chosen, got %s", p)
+	}
+	if err := os.MkdirAll(dir+"/knowledge-base", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(FilePath(), []byte("X=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p := envFilePath(); p != dir+"/knowledge-base/config.env" {
+		t.Errorf("user config: got %s", p)
+	}
+	t.Setenv("KB_ENV_FILE", "/explicit.env")
+	if p := envFilePath(); p != "/explicit.env" {
+		t.Errorf("KB_ENV_FILE: got %s", p)
+	}
+}

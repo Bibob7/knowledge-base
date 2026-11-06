@@ -114,7 +114,7 @@ func handleLine(raw []byte, conv *Conversation, add func(role, text string)) {
 			switch {
 			case bl.Type == "text" && strings.TrimSpace(bl.Text) != "":
 				add("CLAUDE", truncateRunes(strings.TrimSpace(bl.Text), maxAssistantRunes))
-			case bl.Type == "tool_use" && bl.Name == "mcp__knowledge-base__remember":
+			case bl.Type == "tool_use" && isRememberTool(bl.Name):
 				var in struct {
 					Content string `json:"content"`
 				}
@@ -175,4 +175,12 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string([]rune(s)[:n]) + " [...]"
+}
+
+// isRememberTool recognizes our remember tool, both as a plugin server
+// (mcp__plugin_knowledge-base_<server>__remember) and as a server registered by hand
+// (mcp__knowledge-base__remember).
+func isRememberTool(name string) bool {
+	return name == "mcp__knowledge-base__remember" ||
+		strings.HasPrefix(name, "mcp__plugin_knowledge-base_") && strings.HasSuffix(name, "__remember")
 }

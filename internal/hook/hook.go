@@ -141,7 +141,7 @@ func formatLine(id int64, project, content string) string {
 }
 
 // ProjectFromDir returns the lowercase folder name of the git root of dir
-// (empty outside a repo). Matches the rule in claude/rules/knowledge-base.md.
+// (empty outside a repo). Matches the rule in cmd/knowledge-base-mcp/instructions.md.
 func ProjectFromDir(ctx context.Context, dir string) string {
 	if dir == "" {
 		return ""

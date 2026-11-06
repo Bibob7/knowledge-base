@@ -59,17 +59,46 @@ func profileFor(model string) profile {
 	return unknownProfile
 }
 
-// LoadDotEnv reads a .env file and only sets variables that are not already set in
-// the environment. Path: $KB_ENV_FILE, otherwise <binary directory>/../.env.
-// A missing file is not an error.
-func LoadDotEnv() error {
-	path := os.Getenv("KB_ENV_FILE")
-	if path == "" {
-		exe, err := os.Executable()
+// FilePath is the user's configuration file: $XDG_CONFIG_HOME/knowledge-base/config.env,
+// by default ~/.config/knowledge-base/config.env. It lives outside the plugin directories
+// on purpose: those change with every plugin update or are deleted on uninstall, while the
+// database (and its password) outlives both.
+func FilePath() string {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil
+			return ""
 		}
-		path = filepath.Join(filepath.Dir(exe), "..", ".env")
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "knowledge-base", "config.env")
+}
+
+// envFilePath picks the configuration file: $KB_ENV_FILE, otherwise FilePath() if it exists,
+// otherwise <binary directory>/../.env (installations from before the plugin).
+func envFilePath() string {
+	if p := os.Getenv("KB_ENV_FILE"); p != "" {
+		return p
+	}
+	if p := FilePath(); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(exe), "..", ".env")
+}
+
+// LoadDotEnv reads the configuration file (see envFilePath) and only sets variables that
+// are not already set in the environment. A missing file is not an error.
+func LoadDotEnv() error {
+	path := envFilePath()
+	if path == "" {
+		return nil
 	}
 	f, err := os.Open(path)
 	if err != nil {

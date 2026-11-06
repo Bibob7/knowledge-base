@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "kb": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/kb"
+    }
+  }
+}

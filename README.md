@@ -3,58 +3,81 @@
 A local knowledge base for Claude: an MCP server in Go (stdio) on Postgres + pgvector.
 Hybrid search combining vector and full-text search (Reciprocal Rank Fusion).
 
-## Installation (macOS/Linux)
+## Installation (Claude Code plugin, macOS/Linux)
 
-Prerequisites: Go (version according to `go.mod`), Docker with `docker compose`, [Ollama](https://ollama.com/download)
-(or an OpenAI key) and optionally Claude Code.
+Prerequisites: [Go](https://go.dev/dl/) (version according to `go.mod`; the server is built from source on first
+use), Docker with `docker compose` and [Ollama](https://ollama.com/download). Without Docker, an existing Postgres
+with pgvector works (`--database-url`); without Ollama, OpenAI embeddings (`--embedding openai`).
 
-```bash
-git clone <repo> && cd knowledge-base
-./install.sh
+In Claude Code:
+
+```
+/plugin marketplace add https://gitlab.com/Cubicus/knowledge-base.git
+/plugin install knowledge-base@cubicus
+/knowledge-base:setup
 ```
 
-The installer is idempotent (running it again updates) and does the following:
+The repository is private: `marketplace add` uses your git credentials for gitlab.com (SSH:
+`git@gitlab.com:Cubicus/knowledge-base.git`). `/knowledge-base:setup` lets Claude check the prerequisites, explain
+what is missing and run `scripts/setup.sh`, which is idempotent (running it again repairs and updates):
 
-1. Creates `.env` with a random Postgres password (mode 600)
-2. Starts Postgres + pgvector via Docker
+1. Creates `~/.config/knowledge-base/config.env` (mode 600) with a random Postgres password
+2. Starts Postgres + pgvector via Docker (compose project `knowledge-base`, volume `knowledge-base_kb-pgdata`)
 3. Pulls the embedding model `bge-m3` via Ollama
-4. Builds the MCP server into `bin/` and tests it with `bin/knowledge-base-mcp --check`
-5. After asking, copies the rules file to `~/.claude/rules/`, registers the MCP server with Claude Code and adds the hooks to `~/.claude/settings.json`
+4. Builds the server into the plugin data directory and runs the self-test (`--check`)
 
-Then restart Claude Code. The server finds its configuration in `.env` on its own
-(variables from the environment take precedence); `~/.claude.json` contains no credentials.
+Then run `/reload-plugins` or restart Claude Code. The plugin brings everything else along:
 
-| Option | Effect |
+| Part | What it does |
 |---|---|
-| `--yes` | no questions asked |
-| `--no-claude` | skip the Claude integration |
-| `--no-ollama` | do not pull a model |
-| `--embedding openai` | OpenAI instead of Ollama (`OPENAI_API_KEY` in the environment) |
+| MCP server `kb` (`.mcp.json`) | the tools below; its server instructions tell Claude when to search, remember and supersede (`cmd/knowledge-base-mcp/instructions.md`) |
+| Hooks (`hooks/hooks.json`) | retrieval per prompt, learning at session end, silent sweep of crashed sessions |
+| Skill `/knowledge-base:setup` | setup, repair and status |
+
+`scripts/kb` is the launcher used by the MCP server and the hooks: it builds `knowledge-base-mcp` once per plugin
+version into `${CLAUDE_PLUGIN_DATA}/bin/` (`~/.claude/plugins/data/knowledge-base-cubicus/bin/`) and runs it. A hook
+never builds: until the binary exists, hooks do nothing. The configuration and the database live outside the plugin
+and survive updates and uninstalling it.
+
+| `scripts/setup.sh` option | Effect |
+|---|---|
+| `--status` | only report what is installed and what is missing |
 | `--database-url URL` | use an existing Postgres with pgvector instead of Docker |
-| `--uninstall` | remove registration, hooks and rules file, stop containers (data is kept) |
-| `--uninstall --purge` | additionally delete the data volume and `.env` |
+| `--embedding openai` | OpenAI instead of Ollama (`OPENAI_API_KEY` in the environment) |
+| `--no-ollama` | do not pull a model |
+| `--import-env PATH` | take over an existing configuration file |
+| `--remove-legacy` | remove a pre-plugin installation (see below) |
+| `--purge` | stop Postgres and **delete** the data volume and the configuration |
+
+Uninstall: `/plugin uninstall knowledge-base@cubicus` (the database is kept; `scripts/setup.sh --purge` deletes it).
+
+### Upgrading from the pre-plugin installation
+
+Older versions were installed with `install.sh`: hooks in `~/.claude/settings.json`, the rules file
+`~/.claude/rules/knowledge-base.md` and an MCP server registered with `claude mcp add`. Running both would duplicate
+every hook and tool. `/knowledge-base:setup` detects it; `setup.sh --remove-legacy` removes it and takes over its
+`.env` if there is one. The data volume is the same, so all entries are kept.
 
 ### Shared server
 
 Several people can share a central database: run Postgres with pgvector on a server and run
-`./install.sh --database-url postgres://...` for each user. Everyone must use the same embedding model.
+`/knowledge-base:setup --database-url postgres://...` for each user. Everyone must use the same embedding model.
 The MCP server itself still runs locally per user (stdio). The database should then only be reachable
 over TLS and with its own password.
 
-### Manual installation
+### Command line
+
+The server binary also has helper commands (`viz`, `reindex`, `extract`, `sweep`). It finds the configuration in
+`~/.config/knowledge-base/config.env` on its own (variables from the environment take precedence; `KB_ENV_FILE`
+points to another file):
 
 ```bash
-cp .env.example .env && docker compose up -d
-ollama pull bge-m3
-go build -o bin/knowledge-base-mcp ./cmd/knowledge-base-mcp
-claude mcp add knowledge-base --scope user -- "$PWD/bin/knowledge-base-mcp"
-cp claude/rules/knowledge-base.md ~/.claude/rules/
-bin/knowledge-base-mcp install-hooks
+KB="$(ls ~/.claude/plugins/data/knowledge-base-cubicus/bin/knowledge-base-mcp-* | tail -n1)"
+"$KB" --check
 ```
 
-Different embedding model (e.g. OpenAI): adjust `EMBEDDING_*` in `.env`, see `.env.example`. Switching models
-on an existing database: see [Embedding model](#embedding-model).
-Claude Desktop: the same command as an entry in `claude_desktop_config.json`.
+Development: `claude --plugin-dir .` loads the working copy; `KB_FORCE_BUILD=1 scripts/kb --ensure` rebuilds
+the binary for the current version.
 
 ## Tools
 
@@ -74,23 +97,15 @@ are rejected.
 
 ## Automatic retrieval (hooks)
 
-A Claude Code hook (`UserPromptSubmit`, `bin/knowledge-base-mcp hook`) automatically feeds knowledge matching a
+A Claude Code hook (`UserPromptSubmit`, `"$KB" hook`) automatically feeds knowledge matching a
 concrete task into the context: the up to 4 best-matching entries for the prompt (project + cross-project).
 Short prompts (< 20 characters) and slash commands are skipped; whatever was already injected in the session
 is not injected again. There is deliberately no hook at session start: knowledge should be retrieved per task,
-not wholesale. The hook is only a safety net; the lookup itself is driven by the rules file (Claude searches on
+not wholesale. The hook is only a safety net; the lookup itself is driven by the server instructions (Claude searches on
 its own when a task calls for it).
 
 A hook never disturbs the session: on errors (Postgres down, Ollama unreachable, timeout of 8 s) it stays
 silent and exits with code 0. A call typically takes under 100 ms.
-
-```bash
-bin/knowledge-base-mcp install-hooks     # add to ~/.claude/settings.json (backup: settings.json.kb-backup)
-bin/knowledge-base-mcp uninstall-hooks   # remove only our own entries
-```
-
-The installer does this automatically. Existing hooks and the key order are preserved;
-restart Claude Code after changes.
 
 Relevance filter: only hits with a cosine similarity above the model's threshold are injected
 (`KB_HOOK_MIN_SIM`, see [Embedding model](#embedding-model)). For `bge-m3` it is 0.52: off-topic prompts stayed
@@ -101,14 +116,14 @@ Troubleshooting: `KB_HOOK_DEBUG=1` prints all candidates with their similarity t
 
 ```bash
 echo '{"session_id":"t","cwd":"/path/to/repo","hook_event_name":"UserPromptSubmit","prompt":"..."}' \
-  | KB_HOOK_DEBUG=1 bin/knowledge-base-mcp hook
+  | KB_HOOK_DEBUG=1 "$KB" hook
 ```
 
 ## Learning at session end (safety net)
 
 In addition to the immediate `remember` during the session, a `SessionEnd` hook evaluates the transcript:
 
-1. The hook starts a detached background process (`bin/knowledge-base-mcp extract`) and returns immediately,
+1. The hook starts a detached background process (`"$KB" extract`) and returns immediately,
    so ending the session is not delayed.
 2. The process reads only your messages and Claude's text (no tool output, no subagents, no system
    messages). Sessions with fewer than 3 user messages are skipped, very long ones are cut to 100,000
@@ -128,7 +143,7 @@ The evaluation uses your Claude subscription or API access (typically a few cent
 transcript goes to the same provider as your regular session. A guard prevents the background run from
 triggering evaluations or hooks itself.
 
-| Setting (`.env` or environment) | Effect |
+| Setting (`config.env` or environment) | Effect |
 |---|---|
 | `KB_AUTO_LEARN=0` | disable the evaluation at session end (the hook stays registered but does nothing) |
 | `KB_EXTRACT_MODEL` | model used for the evaluation (default `sonnet`) |
@@ -139,7 +154,7 @@ triggering evaluations or hooks itself.
 Test manually without storing anything:
 
 ```bash
-bin/knowledge-base-mcp extract --transcript ~/.claude/projects/<project>/<session>.jsonl \
+"$KB" extract --transcript ~/.claude/projects/<project>/<session>.jsonl \
   --session test --project my-project --dry-run
 ```
 
@@ -148,7 +163,7 @@ On Windows the background evaluation is not implemented.
 ### Sessions that never end cleanly
 
 When a terminal is closed or Claude Code crashes, `SessionEnd` never fires. A `SessionStart` hook therefore
-starts a **silent** background sweep (`bin/knowledge-base-mcp sweep`) whenever a session starts or resumes
+starts a **silent** background sweep (`"$KB" sweep`) whenever a session starts or resumes
 (not on `compact`). It prints nothing, so no knowledge is injected at session start; it only looks for
 transcripts that were never evaluated:
 
@@ -161,18 +176,19 @@ transcripts that were never evaluated:
   one evaluation per session at a time; a session whose evaluation failed is retried after an hour.
 
 The project is taken from the working directory recorded in the transcript. Show what a sweep would do without
-storing anything: `bin/knowledge-base-mcp sweep --dry-run --force`.
+storing anything: `"$KB" sweep --dry-run --force`.
 
 ## Automatic learning
 
-The behavior is controlled by the rules file `claude/rules/knowledge-base.md` (copied by the installer to
-`~/.claude/rules/` and loaded automatically by Claude Code): search first when working on a task, call
-`remember` immediately on corrections/decisions/findings, replace outdated entries via `supersede`.
+The behavior is controlled by the MCP server instructions (`cmd/knowledge-base-mcp/instructions.md`, embedded in
+the binary; Claude Code puts them into the system prompt and cuts them after 4096 characters, a test guards the
+size): search first when working on a task, call `remember` immediately on corrections/decisions/findings, replace
+outdated entries via `supersede`.
 
 ## Visualisation
 
 ```bash
-bin/knowledge-base-mcp viz --open     # http://127.0.0.1:8765/
+"$KB" viz --open     # http://127.0.0.1:8765/
 ```
 
 A live, read-only view of the database: key figures, growth over time, entries per project, a **knowledge map**
@@ -199,8 +215,8 @@ the configuration. To switch models on an existing database (make a `pg_dump` ba
 
 ```bash
 ollama pull <new-model>
-# set EMBEDDING_MODEL (and EMBEDDING_DIM for unknown models) in .env
-bin/knowledge-base-mcp reindex
+# set EMBEDDING_MODEL (and EMBEDDING_DIM for unknown models) in ~/.config/knowledge-base/config.env
+"$KB" reindex
 ```
 
 `reindex` re-embeds every chunk (also those of superseded entries) into a staging table, so an interrupted run
@@ -218,13 +234,14 @@ iterative scans enabled. The same benchmark: HNSW search without filter 5 ms, br
 132 ms, index build 99 s (293 MB). Limits: a single project with far more than ~100k chunks would need its own
 index (partial index or partitioning), and the HNSW index should fit in memory. `docker-compose.yml` therefore
 sets `shared_buffers` and `maintenance_work_mem` to 512 MB and `shm_size` to 1 GB (parallel index builds fail
-with Docker's 64 MB default); raise them on larger machines (see `.env.example`).
+with Docker's 64 MB default); raise them on larger machines (see `config.env.example`).
 
 ## Notes
 
-- **Switching the embedding model** needs `bin/knowledge-base-mcp reindex` (see [Embedding model](#embedding-model)).
-- On macOS never copy a new binary over `bin/knowledge-base-mcp` with `cp`; the process is killed (exit 137) because the old code signature is cached. Run `rm` first or use `go build -o`.
+- **Switching the embedding model** needs `"$KB" reindex` (see [Embedding model](#embedding-model)).
+- On macOS never copy a new binary over a running one with `cp`; the process is killed (exit 137) because the old code signature is cached. `scripts/kb` builds into a temporary file and renames it.
 - The server works with any OpenAI-compatible `/embeddings` endpoint (Ollama, OpenAI, LM Studio, vLLM).
-- Data lives in the Docker volume `kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
-- Postgres is bound to `127.0.0.1` only. The default credentials (`kb`/`kb`) are meant for local use only.
+- Data lives in the Docker volume `knowledge-base_kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
+- Postgres is bound to `127.0.0.1` only. The default credentials (`kb`/`kb`) in `config.env.example` are meant for local use only.
+- On Windows the plugin is not supported (the launcher is a bash script, and the background evaluation is not implemented).
 - Tests: `go test ./...`. The integration test in `internal/store` needs a dedicated empty database: `KB_TEST_DATABASE_URL='postgres://kb:kb@localhost:5433/kb_test?sslmode=disable' go test ./internal/store` (create `kb_test` first).

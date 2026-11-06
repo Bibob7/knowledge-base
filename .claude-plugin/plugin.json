@@ -1,0 +1,9 @@
+{
+  "name": "knowledge-base",
+  "displayName": "Knowledge Base",
+  "version": "0.3.0",
+  "description": "Persistent knowledge base that learns across sessions and projects: hybrid search on Postgres/pgvector, automatic retrieval per prompt and learning at session end",
+  "author": { "name": "Kevin Kreitner" },
+  "repository": "https://gitlab.com/Cubicus/knowledge-base",
+  "keywords": ["memory", "knowledge-base", "mcp", "pgvector", "rag"]
+}
