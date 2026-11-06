@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kevin/knowledge-base/internal/config"
@@ -330,8 +331,20 @@ func runViz(args []string) error {
 	addr := fs.String("addr", "127.0.0.1:8765", "listen address (loopback only, there is no authentication)")
 	open := fs.Bool("open", false, "open the page in the default browser")
 	limit := fs.Int("limit", 5000, "show at most this many entries (newest first)")
+	detach := fs.Bool("detach", false, "run in the background (reuses a running instance) and return")
+	stopRunning := fs.Bool("stop", false, "stop the visualisation running in the background")
+	idle := fs.Duration("idle", 0, "stop after this long without requests, e.g. after the tab was closed (0 = never; default with -detach: 30m)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	switch {
+	case *stopRunning:
+		return stopViz()
+	case *detach:
+		if *idle == 0 {
+			*idle = 30 * time.Minute
+		}
+		return detachViz(*addr, *limit, *idle, *open)
 	}
 	if err := config.LoadDotEnv(); err != nil {
 		return err
@@ -340,14 +353,14 @@ func runViz(args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
-	return viz.Serve(ctx, *addr, viz.Options{Source: st, Limit: *limit}, func(a string) {
+	return viz.Serve(ctx, *addr, viz.Options{Source: st, Limit: *limit, IdleTimeout: *idle}, func(a string) {
 		url := "http://" + a + "/"
 		fmt.Println("Knowledge base view: " + url + "  (Ctrl+C to stop)")
 		if *open {

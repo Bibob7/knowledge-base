@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kevin/knowledge-base/internal/store"
@@ -26,7 +27,15 @@ type Source interface {
 type Options struct {
 	Source Source
 	Limit  int // maximum number of entries shown (newest first)
+	// IdleTimeout stops Serve after this long without any request (0 = never). The page
+	// polls every 10 seconds (background tabs at least once a minute), so the server stops
+	// soon after the last tab is closed.
+	IdleTimeout time.Duration
 }
+
+// PingBody is what /api/ping returns; it tells a running visualisation apart from other
+// services on the same port.
+const PingBody = "knowledge-base-viz"
 
 type docJSON struct {
 	ID           int64    `json:"id"`
@@ -69,6 +78,10 @@ func Handler(o Options) http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
 		w.Write(indexHTML)
+	})
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write([]byte(PingBody))
 	})
 	mux.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -160,7 +173,33 @@ func Serve(ctx context.Context, addr string, o Options, ready func(addr string))
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: Handler(o), ReadHeaderTimeout: 5 * time.Second}
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	h := Handler(o)
+	track := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		last.Store(time.Now().UnixNano())
+		h.ServeHTTP(w, r)
+	})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if o.IdleTimeout > 0 {
+		go func() {
+			tick := time.NewTicker(min(o.IdleTimeout/4, 30*time.Second))
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					if time.Since(time.Unix(0, last.Load())) > o.IdleTimeout {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+	}
+	srv := &http.Server{Handler: track, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
