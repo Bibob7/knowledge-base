@@ -31,7 +31,7 @@ const (
 )
 
 type Deps struct {
-	Store       *store.Store
+	Store       store.Store
 	Embed       *embed.Client
 	QueryPrefix string
 	MinSim      float64

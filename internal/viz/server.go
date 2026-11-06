@@ -18,7 +18,7 @@ import (
 //go:embed index.html
 var indexHTML []byte
 
-// Source provides the data; *store.Store implements it.
+// Source provides the data; every store.Store implements it.
 type Source interface {
 	Snapshot(ctx context.Context, limit int) (*store.Snapshot, error)
 }

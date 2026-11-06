@@ -11,20 +11,9 @@ import (
 // maxIndexedDim is the largest dimension pgvector can index with the plain vector type.
 const maxIndexedDim = 2000
 
-// ReindexOptions configures Reindex.
-type ReindexOptions struct {
-	Model     string
-	Dim       int
-	DocPrefix string
-	Batch     int
-	// Embed returns one vector per text (same order).
-	Embed func(ctx context.Context, texts []string) ([][]float32, error)
-	Logf  func(format string, a ...any)
-}
-
 // CurrentEmbedding reports the dimension of the stored vectors and the model they
 // were created with (empty if unknown).
-func (s *Store) CurrentEmbedding(ctx context.Context) (dim int, model string, err error) {
+func (s *pgStore) CurrentEmbedding(ctx context.Context) (dim int, model string, err error) {
 	if err = s.pool.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute
 		WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'`).Scan(&dim); err != nil {
 		return 0, "", err
@@ -47,7 +36,7 @@ func (s *Store) CurrentEmbedding(ctx context.Context) (dim int, model string, er
 // New vectors are first written to a staging table, so an interrupted run loses
 // nothing and can simply be started again. Only the final swap changes the chunks
 // table, in a single transaction.
-func (s *Store) Reindex(ctx context.Context, o ReindexOptions) error {
+func (s *pgStore) Reindex(ctx context.Context, o ReindexOptions) error {
 	if o.Dim <= 0 || o.Dim > maxIndexedDim {
 		return fmt.Errorf("dimension %d cannot be indexed (supported: 1-%d; larger models would need halfvec)", o.Dim, maxIndexedDim)
 	}

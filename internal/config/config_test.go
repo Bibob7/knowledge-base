@@ -84,3 +84,19 @@ func TestEnvFilePathPrefersExplicitThenUserConfig(t *testing.T) {
 		t.Errorf("KB_ENV_FILE: got %s", p)
 	}
 }
+
+func TestDefaultDatabaseIsSQLiteInDataHome(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("XDG_DATA_HOME", "/data")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.DatabaseURL != "sqlite:///data/knowledge-base/knowledge.db" {
+		t.Errorf("default DatabaseURL = %q", c.DatabaseURL)
+	}
+	t.Setenv("DATABASE_URL", "postgres://kb:kb@db/kb")
+	if c, _ = Load(); c.DatabaseURL != "postgres://kb:kb@db/kb" {
+		t.Errorf("explicit DatabaseURL = %q", c.DatabaseURL)
+	}
+}

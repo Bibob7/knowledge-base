@@ -1,5 +1,5 @@
 // knowledge-base-mcp is an MCP server (stdio) for a knowledge base built on
-// Postgres/pgvector with hybrid search (vector + full text).
+// a database (see internal/store) with hybrid search (vector + full text).
 package main
 
 import (
@@ -34,7 +34,7 @@ var version = "dev"
 
 type app struct {
 	cfg   config.Config
-	store *store.Store
+	store store.Store
 	embed *embed.Client
 }
 

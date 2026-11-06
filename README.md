@@ -2,15 +2,17 @@
 
 [![CI](https://github.com/Bibob7/knowledge-base/actions/workflows/ci.yml/badge.svg)](https://github.com/Bibob7/knowledge-base/actions/workflows/ci.yml)
 
-A persistent memory for Claude Code that learns across sessions and projects: an MCP server in Go (stdio) on
-Postgres + pgvector with hybrid search (vector + full text, Reciprocal Rank Fusion). It retrieves matching knowledge
+A persistent memory for Claude Code that learns across sessions and projects: an MCP server in Go (stdio) with
+hybrid search (vector + full text, Reciprocal Rank Fusion) on a local SQLite file, or optionally on Postgres with
+pgvector (e.g. a server shared by a team). It retrieves matching knowledge
 for each prompt, stores corrections, decisions and verified facts as they come up, replaces outdated entries instead
 of piling them up, and evaluates sessions afterwards as a safety net. Everything runs locally.
 
 ## Installation (Claude Code plugin, macOS/Linux)
 
-Prerequisites: Docker with `docker compose` and [Ollama](https://ollama.com/download). Without Docker, an existing
-Postgres with pgvector works (`--database-url`); without Ollama, OpenAI embeddings (`--embedding openai`). The server
+Prerequisite: [Ollama](https://ollama.com/download) for local embeddings (without it, OpenAI embeddings:
+`--embedding openai`). The database is a SQLite file; SQLite is built into the server binary, so no database
+server or Docker is needed. The server
 binary is downloaded from the [GitHub release](https://github.com/Bibob7/knowledge-base/releases) of the plugin
 version (macOS and Linux, amd64 and arm64); [Go](https://go.dev/dl/) 1.27 or newer is only needed where no release binary exists.
 
@@ -25,10 +27,10 @@ In Claude Code:
 `/knowledge-base:setup` lets Claude check the prerequisites, explain
 what is missing and run `scripts/setup.sh`, which is idempotent (running it again repairs and updates):
 
-1. Creates `~/.config/knowledge-base/config.env` (mode 600) with a random Postgres password
-2. Starts Postgres + pgvector via Docker (compose project `knowledge-base`, volume `knowledge-base_kb-pgdata`)
-3. Pulls the embedding model `bge-m3` via Ollama
-4. Installs the server binary into the plugin data directory and runs the self-test (`--check`)
+1. Creates `~/.config/knowledge-base/config.env` (mode 600)
+2. Pulls the embedding model `bge-m3` via Ollama
+3. Installs the server binary into the plugin data directory
+4. Creates the database `~/.local/share/knowledge-base/knowledge.db` (mode 600) and runs the self-test (`--check`)
 
 Then run `/reload-plugins` or restart Claude Code. The plugin brings everything else along:
 
@@ -48,12 +50,14 @@ and survive updates and uninstalling it.
 | `scripts/setup.sh` option | Effect |
 |---|---|
 | `--status` | only report what is installed and what is missing |
-| `--database-url URL` | use an existing Postgres with pgvector instead of Docker |
+| `--database-url URL` | use another database: `postgres://...` (Postgres with pgvector) or `sqlite:///path.db` |
+| `--postgres` | run a local Postgres with pgvector in Docker instead of SQLite |
+| `--migrate-to-sqlite` | move a Postgres knowledge base into the SQLite file (see below) |
 | `--embedding openai` | OpenAI instead of Ollama (`OPENAI_API_KEY` in the environment) |
 | `--no-ollama` | do not pull a model |
 | `--import-env PATH` | take over an existing configuration file |
 | `--remove-legacy` | remove a pre-plugin installation (see below) |
-| `--purge` | stop Postgres and **delete** the data volume and the configuration |
+| `--purge` | **delete** all knowledge: the SQLite file, the Docker Postgres with its volume, and the configuration |
 
 Uninstall: `/plugin uninstall knowledge-base@bibob7` (the database is kept; `scripts/setup.sh --purge` deletes it).
 
@@ -64,16 +68,37 @@ Older versions were installed with `install.sh`: hooks in `~/.claude/settings.js
 every hook and tool. `/knowledge-base:setup` detects it; `setup.sh --remove-legacy` removes it and takes over its
 `.env` if there is one. The data volume is the same, so all entries are kept.
 
+### Moving from Postgres in Docker to SQLite
+
+Up to version 0.5 the knowledge base ran in Postgres in Docker. Such an installation keeps working after the update.
+To drop Docker, run `/knowledge-base:setup --migrate-to-sqlite`:
+- It copies every entry with its ID, history, tags, timestamps and embeddings into the SQLite file and checks the counts.
+- It switches `DATABASE_URL`; the old URL stays in the configuration as a comment.
+- It stops the container.
+
+Run `/reload-plugins` right after it (until then running sessions still write into Postgres). The Docker
+volume stays as a backup; once everything works, delete it with `docker volume rm knowledge-base_kb-pgdata`. The
+command `"$KB" migrate --from URL --to URL` copies between any two databases, in both directions.
+
+### Which database?
+
+SQLite is the default and fits a personal knowledge base. Search compares the query with every stored vector exactly
+(no approximate index), plus FTS5 full text. Opening the file and searching 10,000 chunks with 1024 dimensions, as
+the hook does per prompt, takes about 80 ms on an M1 Pro. Parallel sessions, hooks and the evaluation share the
+file (WAL mode). Postgres with pgvector (HNSW index) is the choice for a server shared by several people or for
+far more than ~50,000 chunks.
+
 ### Shared server
 
 Several people can share a central database: run Postgres with pgvector on a server and run
-`/knowledge-base:setup --database-url postgres://...` for each user. Everyone must use the same embedding model.
+`/knowledge-base:setup --database-url postgres://...` for each user (an existing personal knowledge base can be
+copied there with `"$KB" migrate --to postgres://...`). Everyone must use the same embedding model.
 The MCP server itself still runs locally per user (stdio). The database should then only be reachable
 over TLS and with its own password.
 
 ### Command line
 
-The server binary also has helper commands (`viz`, `reindex`, `extract`, `sweep`). It finds the configuration in
+The server binary also has helper commands (`viz`, `reindex`, `migrate`, `extract`, `sweep`). It finds the configuration in
 `~/.config/knowledge-base/config.env` on its own (variables from the environment take precedence; `KB_ENV_FILE`
 points to another file):
 
@@ -117,7 +142,7 @@ is not injected again. There is deliberately no hook at session start: knowledge
 not wholesale. The hook is only a safety net; the lookup itself is driven by the server instructions (Claude searches on
 its own when a task calls for it).
 
-A hook never disturbs the session: on errors (Postgres down, Ollama unreachable, timeout of 8 s) it stays
+A hook never disturbs the session: on errors (database unreachable, Ollama unreachable, timeout of 8 s) it stays
 silent and exits with code 0. A call typically takes under 100 ms.
 
 Relevance filter: only hits with a cosine similarity above the model's threshold are injected
@@ -233,7 +258,8 @@ hook threshold, "similar" threshold); for other models set `EMBEDDING_DIM` and c
 (`KB_HOOK_DEBUG=1` prints the similarities) before overriding `KB_HOOK_MIN_SIM` / `KB_SIMILAR_MIN_SIM`.
 
 The dimension and the model name are stored with the data, and the server refuses to start if they differ from
-the configuration. To switch models on an existing database (make a `pg_dump` backup first):
+the configuration. To switch models on an existing database (make a backup first: copy the SQLite file while
+Claude Code is closed, or `pg_dump` on Postgres):
 
 ```bash
 ollama pull <new-model>
@@ -242,13 +268,14 @@ ollama pull <new-model>
 ```
 
 `reindex` re-embeds every chunk (also those of superseded entries) into a staging table, so an interrupted run
-can simply be repeated, and then swaps the vector column and rebuilds the index in one transaction. IDs and
-history are kept. Afterwards restart Claude Code. Dimensions above 2000 are not supported (they would need
-`halfvec`). All users of a shared database must use the same model.
+can simply be repeated, and then switches to the new vectors in one transaction (on Postgres it also rebuilds the
+index). IDs and history are kept. Afterwards restart Claude Code. On Postgres, dimensions above 2000 are not
+supported (they would need `halfvec`); SQLite has no limit. All users of a shared database must use the same model.
 
 ## Scaling
 
-pgvector applies `WHERE` filters after the approximate HNSW scan, which silently drops results when a query is
+SQLite searches exactly over all entries in scope (see [Which database?](#which-database)); the time grows linearly
+with the number of chunks. On Postgres, pgvector applies `WHERE` filters after the approximate HNSW scan, which silently drops results when a query is
 limited to one of many projects. Measured on 150k chunks in 150 projects, this returned only 8.9 of 50 rows
 (recall 0.18). Searches and similarity checks therefore select the rows of the project (or tag) first and sort
 them exactly (4.9 ms, recall 1.0 in the same benchmark); only unfiltered searches use the HNSW index, with
@@ -263,10 +290,12 @@ with Docker's 64 MB default); raise them on larger machines (see `config.env.exa
 - **Switching the embedding model** needs `"$KB" reindex` (see [Embedding model](#embedding-model)).
 - On macOS never copy a new binary over a running one with `cp`; the process is killed (exit 137) because the old code signature is cached. `scripts/kb` builds into a temporary file and renames it.
 - The server works with any OpenAI-compatible `/embeddings` endpoint (Ollama, OpenAI, LM Studio, vLLM).
-- Data lives in the Docker volume `knowledge-base_kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
-- Postgres is bound to `127.0.0.1` only. The default credentials (`kb`/`kb`) in `config.env.example` are meant for local use only.
+- Data lives in `~/.local/share/knowledge-base/knowledge.db` (with `-wal`/`-shm` files next to it while in use). Backup:
+  copy the file while Claude Code is closed, or `sqlite3 knowledge.db ".backup backup.db"` at any time. With Postgres in
+  Docker: the volume `knowledge-base_kb-pgdata`, backup with `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`.
+- The Docker Postgres is bound to `127.0.0.1` only; `--postgres` gives it a random password.
 - On Windows the plugin is not supported (the launcher is a bash script, and the background evaluation is not implemented).
-- Tests: `go test ./...` (CI runs them on every push and pull request, with the integration test against pgvector). The integration test in `internal/store` needs a dedicated empty database: `KB_TEST_DATABASE_URL='postgres://kb:kb@localhost:5433/kb_test?sslmode=disable' go test ./internal/store` (create `kb_test` first).
+- Tests: `go test ./...` (CI runs them on every push and pull request, against pgvector too). Both backends pass the same contract tests (`internal/store/store_contract_test.go`); SQLite always runs, Postgres only with a dedicated test database whose tables are dropped first: `KB_TEST_DATABASE_URL='postgres://kb:kb@localhost:5433/kb_test?sslmode=disable' go test ./internal/store` (create `kb_test` first).
 
 ## License
 
