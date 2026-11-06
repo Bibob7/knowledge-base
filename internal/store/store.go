@@ -1,8 +1,9 @@
 // Package store keeps the knowledge base: documents and facts, their chunks with
 // embeddings, the supersede history, and hybrid search (vector + full text).
 //
-// Store is implemented for Postgres with pgvector; Open picks the implementation
-// from the database URL.
+// Store is implemented for SQLite (a single file, the default) and for Postgres with
+// pgvector (e.g. a shared team server); Open picks the implementation from the
+// database URL: sqlite:///path/to/knowledge.db or postgres://...
 package store
 
 import (
@@ -52,6 +53,8 @@ func Open(ctx context.Context, url string, dim int, model string) (Store, error)
 	switch {
 	case isPostgresURL(url):
 		return openPostgres(ctx, url, dim, model)
+	case isSQLiteURL(url):
+		return openSQLite(ctx, url, dim, model)
 	default:
 		return nil, unsupportedURL(url)
 	}
@@ -63,6 +66,8 @@ func OpenReadOnly(ctx context.Context, url string, dim int) (Store, error) {
 	switch {
 	case isPostgresURL(url):
 		return openPostgresReadOnly(ctx, url, dim)
+	case isSQLiteURL(url):
+		return openSQLiteReadOnly(ctx, url, dim)
 	default:
 		return nil, unsupportedURL(url)
 	}
@@ -77,7 +82,7 @@ func unsupportedURL(url string) error {
 	if !ok {
 		scheme = url
 	}
-	return fmt.Errorf("unsupported DATABASE_URL %q (expected postgres://...)", scheme)
+	return fmt.Errorf("unsupported DATABASE_URL %q (expected sqlite:///path or postgres://...)", scheme)
 }
 
 var ErrNotFound = errors.New("document not found")
