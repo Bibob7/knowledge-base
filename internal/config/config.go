@@ -11,6 +11,8 @@ import (
 )
 
 type Config struct {
+	// DatabaseURL is sqlite:///path/to/knowledge.db (default: DatabasePath) or
+	// postgres://... (Postgres with pgvector, e.g. a shared server).
 	DatabaseURL string
 
 	EmbeddingBaseURL     string
@@ -75,6 +77,21 @@ func FilePath() string {
 	return filepath.Join(base, "knowledge-base", "config.env")
 }
 
+// DatabasePath is the default SQLite database: $XDG_DATA_HOME/knowledge-base/knowledge.db,
+// by default ~/.local/share/knowledge-base/knowledge.db. Like the configuration it lives
+// outside the plugin directories, which Claude Code deletes when the plugin is uninstalled.
+func DatabasePath() string {
+	base := os.Getenv("XDG_DATA_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(base, "knowledge-base", "knowledge.db")
+}
+
 // envFilePath picks the configuration file: $KB_ENV_FILE, otherwise FilePath() if it exists,
 // otherwise <binary directory>/../.env (installations from before the plugin).
 func envFilePath() string {
@@ -135,7 +152,7 @@ func Load() (Config, error) {
 	model := env("EMBEDDING_MODEL", "bge-m3")
 	prof := profileFor(model)
 	c := Config{
-		DatabaseURL:          env("DATABASE_URL", "postgres://kb:kb@localhost:5433/knowledge_base?sslmode=disable"),
+		DatabaseURL:          env("DATABASE_URL", "sqlite://"+DatabasePath()),
 		EmbeddingBaseURL:     env("EMBEDDING_BASE_URL", "http://localhost:11434/v1"),
 		EmbeddingModel:       model,
 		EmbeddingAPIKey:      os.Getenv("EMBEDDING_API_KEY"),

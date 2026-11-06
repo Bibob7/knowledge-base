@@ -306,7 +306,7 @@ func runReindex(args []string) error {
 		model = "(unknown)"
 	}
 	fmt.Printf("stored vectors:  model %s, %d dimensions\nconfigured:      model %s, %d dimensions\n", model, dim, cfg.EmbeddingModel, cfg.EmbeddingDim)
-	fmt.Println("All chunks will be re-embedded and the vector column and index rebuilt. Make a backup first (pg_dump).")
+	fmt.Println("All chunks will be re-embedded. Make a backup first (SQLite: copy the database file while Claude Code is closed; Postgres: pg_dump).")
 	if !*yes {
 		fmt.Print("Continue? [y/N] ")
 		var a string

@@ -26,7 +26,7 @@ func openPostgresReadOnly(ctx context.Context, url string, dim int) (*pgStore, e
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("database not reachable (is 'docker compose up -d' running?): %w", err)
+		return nil, fmt.Errorf("Postgres not reachable (is it running? see /knowledge-base:setup): %w", err)
 	}
 	return &pgStore{pool: pool, dim: dim}, nil
 }
