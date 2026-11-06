@@ -1,30 +1,34 @@
 # knowledge-base
 
-A local knowledge base for Claude: an MCP server in Go (stdio) on Postgres + pgvector.
-Hybrid search combining vector and full-text search (Reciprocal Rank Fusion).
+[![CI](https://github.com/Bibob7/knowledge-base/actions/workflows/ci.yml/badge.svg)](https://github.com/Bibob7/knowledge-base/actions/workflows/ci.yml)
+
+A persistent memory for Claude Code that learns across sessions and projects: an MCP server in Go (stdio) on
+Postgres + pgvector with hybrid search (vector + full text, Reciprocal Rank Fusion). It retrieves matching knowledge
+for each prompt, stores corrections, decisions and verified facts as they come up, replaces outdated entries instead
+of piling them up, and evaluates sessions afterwards as a safety net. Everything runs locally.
 
 ## Installation (Claude Code plugin, macOS/Linux)
 
-Prerequisites: [Go](https://go.dev/dl/) (version according to `go.mod`; the server is built from source on first
-use), Docker with `docker compose` and [Ollama](https://ollama.com/download). Without Docker, an existing Postgres
-with pgvector works (`--database-url`); without Ollama, OpenAI embeddings (`--embedding openai`).
+Prerequisites: Docker with `docker compose` and [Ollama](https://ollama.com/download). Without Docker, an existing
+Postgres with pgvector works (`--database-url`); without Ollama, OpenAI embeddings (`--embedding openai`). The server
+binary is downloaded from the [GitHub release](https://github.com/Bibob7/knowledge-base/releases) of the plugin
+version (macOS and Linux, amd64 and arm64); [Go](https://go.dev/dl/) is only needed where no release binary exists.
 
 In Claude Code:
 
 ```
-/plugin marketplace add https://gitlab.com/Cubicus/knowledge-base.git
-/plugin install knowledge-base@cubicus
+/plugin marketplace add Bibob7/knowledge-base
+/plugin install knowledge-base@bibob7
 /knowledge-base:setup
 ```
 
-The repository is private: `marketplace add` uses your git credentials for gitlab.com (SSH:
-`git@gitlab.com:Cubicus/knowledge-base.git`). `/knowledge-base:setup` lets Claude check the prerequisites, explain
+`/knowledge-base:setup` lets Claude check the prerequisites, explain
 what is missing and run `scripts/setup.sh`, which is idempotent (running it again repairs and updates):
 
 1. Creates `~/.config/knowledge-base/config.env` (mode 600) with a random Postgres password
 2. Starts Postgres + pgvector via Docker (compose project `knowledge-base`, volume `knowledge-base_kb-pgdata`)
 3. Pulls the embedding model `bge-m3` via Ollama
-4. Builds the server into the plugin data directory and runs the self-test (`--check`)
+4. Installs the server binary into the plugin data directory and runs the self-test (`--check`)
 
 Then run `/reload-plugins` or restart Claude Code. The plugin brings everything else along:
 
@@ -35,9 +39,10 @@ Then run `/reload-plugins` or restart Claude Code. The plugin brings everything 
 | Skill `/knowledge-base:setup` | setup, repair and status |
 | Skill `/knowledge-base:viz` | opens the live visualisation in the default browser (see [Visualisation](#visualisation)) |
 
-`scripts/kb` is the launcher used by the MCP server and the hooks: it builds `knowledge-base-mcp` once per plugin
-version into `${CLAUDE_PLUGIN_DATA}/bin/` (`~/.claude/plugins/data/knowledge-base-cubicus/bin/`) and runs it. A hook
-never builds: until the binary exists, hooks do nothing. The configuration and the database live outside the plugin
+`scripts/kb` is the launcher used by the MCP server and the hooks: it installs `knowledge-base-mcp` once per plugin
+version into `${CLAUDE_PLUGIN_DATA}/bin/` (`~/.claude/plugins/data/knowledge-base-bibob7/bin/`) and runs it. It
+downloads the release binary and checks it against the release's `checksums.txt`; if there is none for the version or
+platform, it builds from source with Go. A hook never installs: until the binary exists, hooks do nothing. The configuration and the database live outside the plugin
 and survive updates and uninstalling it.
 
 | `scripts/setup.sh` option | Effect |
@@ -50,7 +55,7 @@ and survive updates and uninstalling it.
 | `--remove-legacy` | remove a pre-plugin installation (see below) |
 | `--purge` | stop Postgres and **delete** the data volume and the configuration |
 
-Uninstall: `/plugin uninstall knowledge-base@cubicus` (the database is kept; `scripts/setup.sh --purge` deletes it).
+Uninstall: `/plugin uninstall knowledge-base@bibob7` (the database is kept; `scripts/setup.sh --purge` deletes it).
 
 ### Upgrading from the pre-plugin installation
 
@@ -73,12 +78,19 @@ The server binary also has helper commands (`viz`, `reindex`, `extract`, `sweep`
 points to another file):
 
 ```bash
-KB="$(ls ~/.claude/plugins/data/knowledge-base-cubicus/bin/knowledge-base-mcp-* | tail -n1)"
+KB="$(ls ~/.claude/plugins/data/knowledge-base-bibob7/bin/knowledge-base-mcp-* | tail -n1)"
 "$KB" --check
 ```
 
-Development: `claude --plugin-dir .` loads the working copy; `KB_FORCE_BUILD=1 scripts/kb --ensure` rebuilds
-the binary for the current version.
+Development: `claude --plugin-dir .` loads the working copy; `KB_FORCE_BUILD=1 scripts/kb --ensure` builds the
+binary for the current version from source (instead of the release binary).
+
+### Releases
+
+Bump `version` in `.claude-plugin/plugin.json`, merge, then tag the same version: `git tag v0.5.0 && git push origin
+v0.5.0`. The release workflow checks that tag and version match, runs the tests and publishes the binaries for
+macOS/Linux (amd64, arm64) with `checksums.txt`. Users who update the plugin before the release exists build from
+source (if Go is installed), so tag right after merging the version bump.
 
 ## Tools
 
@@ -254,4 +266,8 @@ with Docker's 64 MB default); raise them on larger machines (see `config.env.exa
 - Data lives in the Docker volume `knowledge-base_kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
 - Postgres is bound to `127.0.0.1` only. The default credentials (`kb`/`kb`) in `config.env.example` are meant for local use only.
 - On Windows the plugin is not supported (the launcher is a bash script, and the background evaluation is not implemented).
-- Tests: `go test ./...`. The integration test in `internal/store` needs a dedicated empty database: `KB_TEST_DATABASE_URL='postgres://kb:kb@localhost:5433/kb_test?sslmode=disable' go test ./internal/store` (create `kb_test` first).
+- Tests: `go test ./...` (CI runs them on every push and pull request, with the integration test against pgvector). The integration test in `internal/store` needs a dedicated empty database: `KB_TEST_DATABASE_URL='postgres://kb:kb@localhost:5433/kb_test?sslmode=disable' go test ./internal/store` (create `kb_test` first).
+
+## License
+
+[MIT](LICENSE)

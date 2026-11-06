@@ -16,11 +16,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/kevin/knowledge-base/internal/chunk"
-	"github.com/kevin/knowledge-base/internal/config"
-	"github.com/kevin/knowledge-base/internal/embed"
-	"github.com/kevin/knowledge-base/internal/secrets"
-	"github.com/kevin/knowledge-base/internal/store"
+	"github.com/Bibob7/knowledge-base/internal/chunk"
+	"github.com/Bibob7/knowledge-base/internal/config"
+	"github.com/Bibob7/knowledge-base/internal/embed"
+	"github.com/Bibob7/knowledge-base/internal/secrets"
+	"github.com/Bibob7/knowledge-base/internal/store"
 )
 
 // instructions tell Claude when to search, remember and supersede. MCP clients put them into

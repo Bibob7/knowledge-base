@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kevin/knowledge-base/internal/store"
+	"github.com/Bibob7/knowledge-base/internal/store"
 )
 
 const sampleTranscript = `{"type":"mode","mode":"x"}

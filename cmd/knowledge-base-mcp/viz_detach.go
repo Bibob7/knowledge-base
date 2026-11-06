@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kevin/knowledge-base/internal/extract"
-	"github.com/kevin/knowledge-base/internal/viz"
+	"github.com/Bibob7/knowledge-base/internal/extract"
+	"github.com/Bibob7/knowledge-base/internal/viz"
 )
 
 func vizPidPath() string { return filepath.Join(extract.CacheDir(), "viz.pid") }

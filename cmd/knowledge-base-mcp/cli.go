@@ -16,12 +16,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kevin/knowledge-base/internal/config"
-	"github.com/kevin/knowledge-base/internal/embed"
-	"github.com/kevin/knowledge-base/internal/extract"
-	"github.com/kevin/knowledge-base/internal/hook"
-	"github.com/kevin/knowledge-base/internal/store"
-	"github.com/kevin/knowledge-base/internal/viz"
+	"github.com/Bibob7/knowledge-base/internal/config"
+	"github.com/Bibob7/knowledge-base/internal/embed"
+	"github.com/Bibob7/knowledge-base/internal/extract"
+	"github.com/Bibob7/knowledge-base/internal/hook"
+	"github.com/Bibob7/knowledge-base/internal/store"
+	"github.com/Bibob7/knowledge-base/internal/viz"
 )
 
 // runSubcommand runs helper commands. handled=false: start normally as an MCP server.

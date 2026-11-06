@@ -1,4 +1,4 @@
-module github.com/kevin/knowledge-base
+module github.com/Bibob7/knowledge-base
 
 go 1.25.0
 

@@ -14,8 +14,8 @@ the paths are filled in for this installation.
    ```
 
 2. Explain the result to the user in a few lines. Before going on, ask about what you cannot decide alone:
-   - **Missing prerequisites**: Go (to build the server), Docker with a running daemon (local Postgres) and
-     Ollama (local embeddings). The user installs them; do not install system software yourself. Without
+   - **Missing prerequisites**: Docker with a running daemon (local Postgres) and Ollama (local embeddings).
+     Go is only needed if no release binary exists for this version or platform. The user installs them; do not install system software yourself. Without
      Docker they can pass `--database-url postgres://...` (an existing Postgres with pgvector, e.g. a shared
      team server); without Ollama `--embedding openai` (needs `OPENAI_API_KEY` in the environment).
    - **Pre-plugin installation found**: it runs alongside the plugin and would duplicate every hook and tool.

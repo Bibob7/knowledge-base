@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # Launcher for knowledge-base-mcp, used by the plugin's MCP server and hooks.
 #
-# The Go binary is built once per plugin version into the plugin's data directory
-# (${CLAUDE_PLUGIN_DATA}, kept across plugin updates) and then executed with all arguments.
+# The Go binary is installed once per plugin version into the plugin's data directory
+# (${CLAUDE_PLUGIN_DATA}, kept across plugin updates) and then executed with all arguments:
+# downloaded from the GitHub release of that version (SHA-256 checked), otherwise built from
+# source with Go.
 #
-#   kb [args...]   build if needed, then run the binary (no args: MCP server on stdio)
+#   kb [args...]   install if needed, then run the binary (no args: MCP server on stdio)
 #   kb hook        run the hook; if the binary is not built yet, do nothing (a hook must never block)
-#   kb --ensure    only build if needed and print the binary path
-#   kb --path      print the binary path without building
+#   kb --ensure    only install if needed and print the binary path
+#   kb --path      print the binary path without installing
 #   kb --data DIR ...  use DIR as data directory (for skills: the Bash tool has no CLAUDE_PLUGIN_DATA)
 #
-# KB_FORCE_BUILD=1 rebuilds even if the binary for this version exists (for development).
+# KB_FORCE_BUILD=1 builds from source even if a binary for this version exists (development:
+# the working copy may differ from the release). KB_NO_DOWNLOAD=1 never downloads.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -22,6 +25,7 @@ VERSION="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$RO
 VERSION="${VERSION:-dev}"
 BIN_DIR="$DATA/bin"
 BIN="$BIN_DIR/knowledge-base-mcp-$VERSION"
+REPO="Bibob7/knowledge-base"
 
 find_go() {
   if command -v go >/dev/null 2>&1; then command -v go; return; fi
@@ -29,6 +33,32 @@ find_go() {
     if [ -x "$g" ]; then echo "$g"; return; fi
   done
   return 1
+}
+
+# download TARGET: fetch the release binary for this platform and verify its checksum.
+download() {
+  local target="$1" os arch asset base sum want
+  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    arm64|aarch64) arch=arm64 ;;
+    *) return 1 ;;
+  esac
+  case "$os" in darwin|linux) ;; *) return 1 ;; esac
+  command -v curl >/dev/null 2>&1 || return 1
+  asset="knowledge-base-mcp_${VERSION}_${os}_${arch}"
+  base="https://github.com/$REPO/releases/download/v$VERSION"
+  want="$(curl -fsSL --max-time 30 "$base/checksums.txt" 2>/dev/null | awk -v a="$asset" '$2 == a {print $1}')"
+  [ -n "$want" ] || return 1
+  echo "knowledge-base: downloading knowledge-base-mcp $VERSION ($os/$arch)" >&2
+  curl -fsSL --max-time 300 -o "$target" "$base/$asset" || return 1
+  if command -v sha256sum >/dev/null 2>&1; then sum="$(sha256sum "$target" | awk '{print $1}')"
+  else sum="$(shasum -a 256 "$target" | awk '{print $1}')"; fi
+  if [ "$sum" != "$want" ]; then
+    echo "knowledge-base: checksum mismatch for $asset, discarding the download" >&2
+    rm -f "$target"; return 1
+  fi
+  chmod +x "$target"
 }
 
 build() {
@@ -48,13 +78,17 @@ build() {
     rmdir "$lock" 2>/dev/null || true; trap - EXIT; return 0
   fi
 
-  if ! go="$(find_go)"; then
-    echo "knowledge-base: Go is required to build the server (https://go.dev/dl/), then run /knowledge-base:setup" >&2
-    return 1
-  fi
-  echo "knowledge-base: building knowledge-base-mcp $VERSION (one-time, this can take a minute)" >&2
   tmp="$BIN.tmp.$$"
-  (cd "$ROOT" && "$go" build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$tmp" ./cmd/knowledge-base-mcp) >&2
+  if [ "${KB_FORCE_BUILD:-0}" = 1 ] || [ "${KB_NO_DOWNLOAD:-0}" = 1 ] || ! download "$tmp"; then
+    rm -f "$tmp"
+    if ! go="$(find_go)"; then
+      echo "knowledge-base: no release binary for $VERSION on this platform and Go is not installed" \
+        "(https://go.dev/dl/); then run /knowledge-base:setup" >&2
+      return 1
+    fi
+    echo "knowledge-base: building knowledge-base-mcp $VERSION from source (one-time, this can take a minute)" >&2
+    (cd "$ROOT" && "$go" build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$tmp" ./cmd/knowledge-base-mcp) >&2
+  fi
   # Rename instead of copying over the old file: on macOS overwriting a signed binary in
   # place gets the process killed (cached code signature).
   mv -f "$tmp" "$BIN"
@@ -69,7 +103,7 @@ ensure() {
 
 case "${1:-}" in
   hook)
-    # Never build (or fail) inside a hook: the MCP server or /knowledge-base:setup builds.
+    # Never install (or fail) inside a hook: the MCP server or /knowledge-base:setup does.
     [ -x "$BIN" ] || exit 0
     exec "$BIN" "$@"
     ;;

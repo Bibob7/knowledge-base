@@ -11,9 +11,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kevin/knowledge-base/internal/embed"
-	"github.com/kevin/knowledge-base/internal/secrets"
-	"github.com/kevin/knowledge-base/internal/store"
+	"github.com/Bibob7/knowledge-base/internal/embed"
+	"github.com/Bibob7/knowledge-base/internal/secrets"
+	"github.com/Bibob7/knowledge-base/internal/store"
 )
 
 const (

@@ -1,0 +1,43 @@
+name: Release
+
+# Push a tag vX.Y.Z that matches "version" in .claude-plugin/plugin.json. The plugin's launcher
+# (scripts/kb) downloads knowledge-base-mcp_<version>_<os>_<arch> from this release and checks
+# it against checksums.txt; without a release it falls back to building from source.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Check the tag against plugin.json
+        run: |
+          version="$(jq -r .version .claude-plugin/plugin.json)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match plugin.json version $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: go test ./...
+      - name: Build
+        run: |
+          mkdir dist
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o "dist/knowledge-base-mcp_${VERSION}_${os}_${arch}" ./cmd/knowledge-base-mcp
+          done
+          (cd dist && sha256sum knowledge-base-mcp_* > checksums.txt)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes

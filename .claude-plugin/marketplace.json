@@ -1,7 +1,10 @@
 {
-  "name": "cubicus",
-  "description": "Claude Code plugins by Cubicus",
-  "owner": { "name": "Kevin Kreitner" },
+  "name": "bibob7",
+  "description": "Claude Code plugins by Bibob7",
+  "owner": {
+    "name": "Kevin Kreitner",
+    "url": "https://github.com/Bibob7"
+  },
   "plugins": [
     {
       "name": "knowledge-base",

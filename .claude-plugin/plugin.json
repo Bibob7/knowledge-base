@@ -1,9 +1,20 @@
 {
   "name": "knowledge-base",
   "displayName": "Knowledge Base",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Persistent knowledge base that learns across sessions and projects: hybrid search on Postgres/pgvector, automatic retrieval per prompt and learning at session end",
-  "author": { "name": "Kevin Kreitner" },
-  "repository": "https://gitlab.com/Cubicus/knowledge-base",
-  "keywords": ["memory", "knowledge-base", "mcp", "pgvector", "rag"]
+  "author": {
+    "name": "Kevin Kreitner",
+    "url": "https://github.com/Bibob7"
+  },
+  "repository": "https://github.com/Bibob7/knowledge-base",
+  "keywords": [
+    "memory",
+    "knowledge-base",
+    "mcp",
+    "pgvector",
+    "rag"
+  ],
+  "homepage": "https://github.com/Bibob7/knowledge-base",
+  "license": "MIT"
 }

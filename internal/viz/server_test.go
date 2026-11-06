@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kevin/knowledge-base/internal/store"
+	"github.com/Bibob7/knowledge-base/internal/store"
 )
 
 type fakeSource struct{}

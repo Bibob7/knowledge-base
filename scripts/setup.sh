@@ -83,7 +83,7 @@ status() {
   local bin
   say "Status"
   if [ -f "$CONFIG" ]; then ok "configuration $CONFIG"; else miss "configuration $CONFIG (missing)"; fi
-  if have go; then ok "Go $(go env GOVERSION)"; else miss "Go (needed to build the server: https://go.dev/dl/)"; fi
+  if have go; then ok "Go $(go env GOVERSION)"; else ok "Go not installed (only needed without a release binary)"; fi
   bin="$("$KB" --path)"
   if [ -n "$bin" ] && [ -x "$bin" ]; then ok "server binary $bin"; else miss "server binary (not built)"; fi
   if have docker && docker info >/dev/null 2>&1; then
@@ -212,7 +212,7 @@ if [ "$NO_OLLAMA" = 0 ]; then
 fi
 
 # ---------- Build and self-test ----------
-say "Building the server"
+say "Installing the server binary"
 bin="$("$KB" --ensure)"
 say "Self-test (database + embedding)"
 KB_ENV_FILE="$CONFIG" "$bin" --check || die "Self-test failed (see above). After fixing it, run the setup again."
