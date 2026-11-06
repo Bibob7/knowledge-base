@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installer fuer die knowledge-base (macOS/Linux). Idempotent: erneutes Ausfuehren aktualisiert.
+# Installer for the knowledge base (macOS/Linux). Idempotent: running it again updates.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,17 +15,17 @@ DATABASE_URL_ARG=""; PROVIDER="ollama"
 
 usage() {
   cat <<USAGE
-Verwendung: ./install.sh [Optionen]
+Usage: ./install.sh [options]
 
-  --yes                 Keine Rueckfragen
-  --no-claude           Claude-Integration (Regeldatei, MCP-Registrierung, Hooks) ueberspringen
-  --no-ollama           Kein Embedding-Modell ziehen (z.B. wenn es schon laeuft/anders konfiguriert ist)
-  --database-url URL    Vorhandenes Postgres mit pgvector nutzen statt lokalem Docker
-                        (z.B. zentraler Server fuer mehrere Nutzer)
-  --embedding openai    OpenAI statt Ollama (erwartet OPENAI_API_KEY in der Umgebung)
-  --uninstall           MCP-Registrierung, Hooks und Regeldatei entfernen, Container stoppen (Daten bleiben)
-  --purge               Mit --uninstall: zusaetzlich Daten-Volume und .env loeschen
-  -h, --help            Diese Hilfe
+  --yes                 No questions asked
+  --no-claude           Skip the Claude integration (rules file, MCP registration, hooks)
+  --no-ollama           Do not pull an embedding model (e.g. if it is already available/configured differently)
+  --database-url URL    Use an existing Postgres with pgvector instead of local Docker
+                        (e.g. a central server for several users)
+  --embedding openai    Use OpenAI instead of Ollama (expects OPENAI_API_KEY in the environment)
+  --uninstall           Remove MCP registration, hooks and rules file, stop containers (data is kept)
+  --purge               With --uninstall: also delete the data volume and .env
+  -h, --help            This help
 USAGE
 }
 
@@ -34,29 +34,29 @@ while [ $# -gt 0 ]; do
     --yes|-y) YES=1 ;;
     --no-claude) NO_CLAUDE=1 ;;
     --no-ollama) NO_OLLAMA=1 ;;
-    --database-url) DATABASE_URL_ARG="${2:?--database-url braucht einen Wert}"; shift ;;
-    --embedding) PROVIDER="${2:?--embedding braucht einen Wert}"; shift ;;
+    --database-url) DATABASE_URL_ARG="${2:?--database-url needs a value}"; shift ;;
+    --embedding) PROVIDER="${2:?--embedding needs a value}"; shift ;;
     --uninstall) UNINSTALL=1 ;;
     --purge) PURGE=1 ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "Unbekannte Option: $1" >&2; usage >&2; exit 2 ;;
+    *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
   shift
 done
 
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!!\033[0m  %s\n' "$*" >&2; }
-die()  { printf '\033[31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
+die()  { printf '\033[31mError:\033[0m %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-confirm() { # confirm "Frage" -> 0 bei ja; --yes antwortet immer ja
+confirm() { # confirm "question" -> 0 on yes; --yes always answers yes
   [ "$YES" = 1 ] && return 0
   [ -t 0 ] || return 1
-  local a; read -r -p "$1 [J/n] " a
-  case "${a:-j}" in j|J|y|Y|ja|yes) return 0 ;; *) return 1 ;; esac
+  local a; read -r -p "$1 [Y/n] " a
+  case "${a:-y}" in y|Y|yes|Yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
-# set_env KEY VALUE: Wert in .env ersetzen oder anhaengen (portabel, ohne sed -i)
+# set_env KEY VALUE: replace or append a value in .env (portable, without sed -i)
 set_env() {
   local key="$1" val="$2" tmp
   tmp="$(mktemp)"
@@ -74,59 +74,59 @@ random_hex() {
   if have openssl; then openssl rand -hex 16; else LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 32; fi
 }
 
-# ---------- Deinstallation ----------
+# ---------- Uninstall ----------
 if [ "$UNINSTALL" = 1 ]; then
   if [ -x "$BIN" ]; then
-    say "Entferne Hooks aus ~/.claude/settings.json"
-    "$BIN" uninstall-hooks || warn "Hooks konnten nicht entfernt werden"
+    say "Removing hooks from ~/.claude/settings.json"
+    "$BIN" uninstall-hooks || warn "Could not remove the hooks"
   fi
   if have claude; then
-    say "Entferne MCP-Registrierung"
-    claude mcp remove "$MCP_NAME" --scope user >/dev/null 2>&1 || warn "MCP war nicht registriert"
+    say "Removing MCP registration"
+    claude mcp remove "$MCP_NAME" --scope user >/dev/null 2>&1 || warn "MCP was not registered"
   fi
-  if [ -f "$RULES_DST" ]; then say "Entferne $RULES_DST"; rm -f "$RULES_DST"; fi
+  if [ -f "$RULES_DST" ]; then say "Removing $RULES_DST"; rm -f "$RULES_DST"; fi
   if have docker && [ -f docker-compose.yml ]; then
     if [ "$PURGE" = 1 ]; then
-      say "Stoppe Container und loesche Daten-Volume"
+      say "Stopping containers and deleting the data volume"
       docker compose down -v
       rm -f .env
     else
-      say "Stoppe Container (Daten bleiben erhalten; --purge loescht sie)"
+      say "Stopping containers (data is kept; --purge deletes it)"
       docker compose down
     fi
   fi
   rm -f "$BIN"
-  say "Deinstalliert."
+  say "Uninstalled."
   exit 0
 fi
 
-# ---------- Voraussetzungen ----------
-say "Pruefe Voraussetzungen"
-have go || die "Go fehlt (siehe https://go.dev/dl/)."
+# ---------- Prerequisites ----------
+say "Checking prerequisites"
+have go || die "Go is missing (see https://go.dev/dl/)."
 need_go="$(awk '/^go [0-9]/{print $2; exit}' go.mod)"
 have_go="$(go env GOVERSION | sed 's/^go//')"
 lowest="$(printf '%s\n%s\n' "$need_go" "$have_go" | sort -V | head -n1)"
 if [ "$lowest" != "$need_go" ]; then
-  warn "Go $have_go gefunden, go.mod verlangt $need_go. Go laedt ggf. automatisch die passende Toolchain."
+  warn "Found Go $have_go, go.mod requires $need_go. Go may download the matching toolchain automatically."
 fi
 
 USE_DOCKER=1
 [ -n "$DATABASE_URL_ARG" ] && USE_DOCKER=0
 if [ "$USE_DOCKER" = 1 ]; then
-  have docker || die "Docker fehlt (oder nutze --database-url mit einem vorhandenen Postgres)."
-  docker compose version >/dev/null 2>&1 || die "'docker compose' (v2) fehlt."
-  docker info >/dev/null 2>&1 || die "Docker-Daemon laeuft nicht."
+  have docker || die "Docker is missing (or use --database-url with an existing Postgres)."
+  docker compose version >/dev/null 2>&1 || die "'docker compose' (v2) is missing."
+  docker info >/dev/null 2>&1 || die "The Docker daemon is not running."
 fi
 
 case "$PROVIDER" in
   ollama) ;;
-  openai) [ -n "${OPENAI_API_KEY:-}" ] || die "--embedding openai braucht OPENAI_API_KEY in der Umgebung." ;;
-  *) die "Unbekannter Embedding-Provider: $PROVIDER (ollama|openai)" ;;
+  openai) [ -n "${OPENAI_API_KEY:-}" ] || die "--embedding openai needs OPENAI_API_KEY in the environment." ;;
+  *) die "Unknown embedding provider: $PROVIDER (ollama|openai)" ;;
 esac
 
 # ---------- .env ----------
 if [ ! -f .env ]; then
-  say "Erzeuge .env"
+  say "Creating .env"
   cp .env.example .env
   chmod 600 .env
   if [ "$USE_DOCKER" = 1 ]; then
@@ -135,7 +135,7 @@ if [ ! -f .env ]; then
     set_env DATABASE_URL "postgres://$(get_env POSTGRES_USER):${pw}@localhost:$(get_env POSTGRES_PORT)/$(get_env POSTGRES_DB)?sslmode=disable"
   fi
 else
-  say ".env existiert bereits, wird beibehalten"
+  say ".env already exists, keeping it"
 fi
 if [ "$USE_DOCKER" = 0 ]; then
   set_env DATABASE_URL "$DATABASE_URL_ARG"
@@ -150,59 +150,59 @@ fi
 
 # ---------- Postgres ----------
 if [ "$USE_DOCKER" = 1 ]; then
-  say "Starte Postgres + pgvector (Docker)"
+  say "Starting Postgres + pgvector (Docker)"
   docker compose up -d --wait
 else
-  say "Nutze vorhandene Datenbank (kein Docker)"
+  say "Using the existing database (no Docker)"
 fi
 
-# ---------- Embedding-Modell ----------
+# ---------- Embedding model ----------
 if [ "$NO_OLLAMA" = 0 ]; then
   model="$(get_env EMBEDDING_MODEL)"; model="${model:-nomic-embed-text}"
   if have ollama; then
     if ollama list 2>/dev/null | awk 'NR>1{print $1}' | grep -qE "^${model}(:|$)"; then
-      say "Ollama-Modell $model ist bereits vorhanden"
+      say "Ollama model $model is already available"
     else
-      say "Ziehe Ollama-Modell $model"
-      ollama pull "$model" || warn "Konnte $model nicht ziehen (laeuft der Ollama-Server?)"
+      say "Pulling Ollama model $model"
+      ollama pull "$model" || warn "Could not pull $model (is the Ollama server running?)"
     fi
   else
-    warn "Ollama nicht gefunden (https://ollama.com/download). Danach: ollama pull $model"
+    warn "Ollama not found (https://ollama.com/download). Afterwards: ollama pull $model"
   fi
 fi
 
 # ---------- Build ----------
-say "Baue MCP-Server"
+say "Building the MCP server"
 mkdir -p bin
 go build -o "$BIN" ./cmd/knowledge-base-mcp
 
-say "Pruefe Datenbank und Embedding"
+say "Checking database and embedding"
 if ! "$BIN" --check; then
-  die "Selbsttest fehlgeschlagen (siehe Meldung oben). Nach der Korrektur ./install.sh erneut ausfuehren."
+  die "Self-test failed (see the message above). After fixing it, run ./install.sh again."
 fi
 
-# ---------- Claude-Integration ----------
+# ---------- Claude integration ----------
 if [ "$NO_CLAUDE" = 1 ]; then
-  say "Claude-Integration uebersprungen"
+  say "Claude integration skipped"
 elif ! have claude; then
-  warn "Claude Code CLI nicht gefunden. Manuell:"
+  warn "Claude Code CLI not found. Manually:"
   echo "    mkdir -p ~/.claude/rules && cp '$RULES_SRC' '$RULES_DST'"
   echo "    claude mcp add $MCP_NAME --scope user -- '$BIN'"
-  echo "    '$BIN' install-hooks    # Hooks: Abruf pro Prompt + Lernen am Sitzungsende (~/.claude/settings.json)"
-elif confirm "Regeldatei nach ~/.claude/rules/ kopieren, MCP registrieren und Hooks in ~/.claude/settings.json eintragen?"; then
+  echo "    '$BIN' install-hooks    # hooks: retrieval per prompt + learning at session end (~/.claude/settings.json)"
+elif confirm "Copy the rules file to ~/.claude/rules/, register the MCP server and add hooks to ~/.claude/settings.json?"; then
   mkdir -p "$(dirname "$RULES_DST")"
   if [ -f "$RULES_DST" ] && ! cmp -s "$RULES_SRC" "$RULES_DST"; then
     cp "$RULES_DST" "$RULES_DST.bak"
-    warn "Bestehende Regeldatei gesichert als $RULES_DST.bak"
+    warn "Existing rules file backed up as $RULES_DST.bak"
   fi
   cp "$RULES_SRC" "$RULES_DST"
   claude mcp remove "$MCP_NAME" --scope user >/dev/null 2>&1 || true
   claude mcp add "$MCP_NAME" --scope user -- "$BIN"
-  say "Trage Hooks (Abruf pro Prompt, Lernen am Sitzungsende) in ~/.claude/settings.json ein"
-  "$BIN" install-hooks || warn "Hooks konnten nicht eingetragen werden (spaeter: $BIN install-hooks)"
-  say "Registriert. Claude Code neu starten, damit Tools und Hooks aktiv werden."
+  say "Adding hooks (retrieval per prompt, learning at session end) to ~/.claude/settings.json"
+  "$BIN" install-hooks || warn "Could not add the hooks (later: $BIN install-hooks)"
+  say "Registered. Restart Claude Code so that tools and hooks become active."
 else
-  say "Claude-Integration uebersprungen"
+  say "Claude integration skipped"
 fi
 
-say "Fertig. Konfiguration: $ROOT/.env  |  Selbsttest: $BIN --check"
+say "Done. Configuration: $ROOT/.env  |  Self-test: $BIN --check"

@@ -9,21 +9,21 @@ import (
 	"strings"
 )
 
-// Events, fuer die Hooks registriert werden.
+// Events for which hooks are registered.
 var Events = []string{"UserPromptSubmit", "SessionEnd"}
 
-// legacyEvents hatten frueher Hooks von uns; Install/Uninstall raeumen sie auf.
+// legacyEvents used to have hooks of ours; Install/Uninstall clean them up.
 var legacyEvents = []string{"SessionStart"}
 
 const hookTimeoutSeconds = 10
 
-// IsOurs erkennt Hook-Kommandos dieses Programms ("<pfad>/knowledge-base-mcp hook").
+// IsOurs recognizes hook commands of this program ("<path>/knowledge-base-mcp hook").
 func IsOurs(command string) bool {
 	c := strings.TrimSpace(command)
 	return strings.Contains(c, "knowledge-base-mcp") && strings.HasSuffix(c, " hook")
 }
 
-// Command baut das Hook-Kommando fuer das Binary unter exe.
+// Command builds the hook command for the binary at exe.
 func Command(exe string) string {
 	if strings.ContainsAny(exe, " \t") {
 		exe = "'" + exe + "'"
@@ -31,7 +31,7 @@ func Command(exe string) string {
 	return exe + " hook"
 }
 
-// DefaultSettingsPath ist ~/.claude/settings.json (oder $KB_SETTINGS).
+// DefaultSettingsPath is ~/.claude/settings.json (or $KB_SETTINGS).
 func DefaultSettingsPath() (string, error) {
 	if p := os.Getenv("KB_SETTINGS"); p != "" {
 		return p, nil
@@ -43,8 +43,8 @@ func DefaultSettingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// Install traegt die Hooks in die settings.json ein (idempotent). Bestehende
-// Eintraege, Schluessel-Reihenfolge und fremde Hooks bleiben erhalten.
+// Install adds the hooks to settings.json (idempotent). Existing entries,
+// key order and foreign hooks are preserved.
 func Install(path, command string) (changed bool, err error) {
 	return rewrite(path, func(hooks *object) {
 		removeFrom(hooks, legacyEvents)
@@ -58,14 +58,14 @@ func Install(path, command string) (changed bool, err error) {
 	})
 }
 
-// Uninstall entfernt nur die eigenen Hook-Eintraege.
+// Uninstall removes only our own hook entries.
 func Uninstall(path string) (changed bool, err error) {
 	return rewrite(path, func(hooks *object) {
 		removeFrom(hooks, append(append([]string{}, Events...), legacyEvents...))
 	})
 }
 
-// removeFrom entfernt unsere Hooks aus den Events und loescht dadurch leer gewordene Events.
+// removeFrom removes our hooks from the events and deletes events that become empty.
 func removeFrom(hooks *object, events []string) {
 	for _, ev := range events {
 		if _, ok := hooks.get(ev); !ok {
@@ -90,12 +90,12 @@ func rewrite(path string, mutate func(hooks *object)) (bool, error) {
 	}
 	top, err := parseObject(orig)
 	if err != nil {
-		return false, fmt.Errorf("%s ist kein gueltiges JSON-Objekt: %w", path, err)
+		return false, fmt.Errorf("%s is not a valid JSON object: %w", path, err)
 	}
 	hooks := &object{}
 	if raw, ok := top.get("hooks"); ok {
 		if hooks, err = parseObject(raw); err != nil {
-			return false, fmt.Errorf("'hooks' in %s ist kein Objekt: %w", path, err)
+			return false, fmt.Errorf("'hooks' in %s is not an object: %w", path, err)
 		}
 	}
 	mutate(hooks)
@@ -137,7 +137,7 @@ func rewrite(path string, mutate func(hooks *object)) (bool, error) {
 	return true, os.Rename(tmp.Name(), path)
 }
 
-// removeOurs entfernt eigene Hook-Eintraege aus einer Liste von Hook-Gruppen.
+// removeOurs removes our own hook entries from a list of hook groups.
 func removeOurs(groups []json.RawMessage) []json.RawMessage {
 	var out []json.RawMessage
 	for _, g := range groups {
@@ -164,7 +164,7 @@ func removeOurs(groups []json.RawMessage) []json.RawMessage {
 		case other == 0:
 			// ganze Gruppe war unsere
 		default:
-			// gemischte Gruppe: nur unsere Hooks herausfiltern
+			// mixed group: filter out only our hooks
 			var m map[string]any
 			if json.Unmarshal(g, &m) != nil {
 				out = append(out, g)
@@ -186,7 +186,7 @@ func removeOurs(groups []json.RawMessage) []json.RawMessage {
 	return out
 }
 
-// --- kleine Hilfen fuer JSON-Objekte mit erhaltener Schluessel-Reihenfolge ---
+// --- small helpers for JSON objects that preserve key order ---
 
 type kv struct {
 	key string
@@ -198,7 +198,7 @@ type object struct{ items []kv }
 func parseObject(raw []byte) (*object, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
-		return nil, fmt.Errorf("objekt erwartet")
+		return nil, fmt.Errorf("object expected")
 	}
 	o := &object{}
 	for dec.More() {
@@ -208,7 +208,7 @@ func parseObject(raw []byte) (*object, error) {
 		}
 		key, ok := t.(string)
 		if !ok {
-			return nil, fmt.Errorf("ungueltiger schluessel")
+			return nil, fmt.Errorf("invalid key")
 		}
 		var v json.RawMessage
 		if err := dec.Decode(&v); err != nil {

@@ -10,7 +10,7 @@ import (
 	"syscall"
 )
 
-// CacheDir ist das Verzeichnis fuer Log und Fortschrittsdateien.
+// CacheDir is the directory for the log and progress files.
 func CacheDir() string {
 	base, err := os.UserCacheDir()
 	if err != nil {
@@ -19,14 +19,14 @@ func CacheDir() string {
 	return filepath.Join(base, "knowledge-base")
 }
 
-// LogPath ist die Logdatei der Hintergrundauswertung.
+// LogPath is the log file of the background extraction.
 func LogPath() string { return filepath.Join(CacheDir(), "extract.log") }
 
-// StateDir enthaelt die Fortschrittsdateien je Session.
+// StateDir holds the per-session progress files.
 func StateDir() string { return filepath.Join(CacheDir(), "state") }
 
-// Spawn startet die Auswertung als eigenstaendigen Hintergrundprozess und kehrt
-// sofort zurueck. Der Prozess ueberlebt das Ende der aufrufenden Sitzung.
+// Spawn starts the extraction as an independent background process and returns
+// immediately. The process outlives the calling session.
 func Spawn(exe, transcript, session, cwd string) error {
 	if err := os.MkdirAll(CacheDir(), 0o700); err != nil {
 		return err

@@ -1,47 +1,47 @@
 # knowledge-base
 
-Lokale Wissensdatenbank fuer Claude: ein MCP-Server in Go (stdio) auf Postgres + pgvector.
-Hybrid-Suche aus Vektor- und Volltextsuche (Reciprocal Rank Fusion).
+A local knowledge base for Claude: an MCP server in Go (stdio) on Postgres + pgvector.
+Hybrid search combining vector and full-text search (Reciprocal Rank Fusion).
 
 ## Installation (macOS/Linux)
 
-Voraussetzungen: Go (Version laut `go.mod`), Docker mit `docker compose`, [Ollama](https://ollama.com/download)
-(oder ein OpenAI-Key) und optional Claude Code.
+Prerequisites: Go (version according to `go.mod`), Docker with `docker compose`, [Ollama](https://ollama.com/download)
+(or an OpenAI key) and optionally Claude Code.
 
 ```bash
 git clone <repo> && cd knowledge-base
 ./install.sh
 ```
 
-Der Installer ist idempotent (erneutes Ausfuehren aktualisiert) und erledigt:
+The installer is idempotent (running it again updates) and does the following:
 
-1. `.env` mit zufaelligem Postgres-Passwort anlegen (Rechte 600)
-2. Postgres + pgvector per Docker starten
-3. Embedding-Modell `nomic-embed-text` ueber Ollama ziehen
-4. den MCP-Server nach `bin/` bauen und per `bin/knowledge-base-mcp --check` testen
-5. nach Rueckfrage die Regeldatei nach `~/.claude/rules/` kopieren und den MCP bei Claude Code registrieren
+1. Creates `.env` with a random Postgres password (mode 600)
+2. Starts Postgres + pgvector via Docker
+3. Pulls the embedding model `nomic-embed-text` via Ollama
+4. Builds the MCP server into `bin/` and tests it with `bin/knowledge-base-mcp --check`
+5. After asking, copies the rules file to `~/.claude/rules/`, registers the MCP server with Claude Code and adds the hooks to `~/.claude/settings.json`
 
-Danach Claude Code neu starten. Der Server findet seine Konfiguration selbst in `.env`
-(Variablen aus der Umgebung haben Vorrang), in `~/.claude.json` stehen keine Zugangsdaten.
+Then restart Claude Code. The server finds its configuration in `.env` on its own
+(variables from the environment take precedence); `~/.claude.json` contains no credentials.
 
-| Option | Wirkung |
+| Option | Effect |
 |---|---|
-| `--yes` | keine Rueckfragen |
-| `--no-claude` | Claude-Integration ueberspringen |
-| `--no-ollama` | kein Modell ziehen |
-| `--embedding openai` | OpenAI statt Ollama (`OPENAI_API_KEY` in der Umgebung) |
-| `--database-url URL` | vorhandenes Postgres mit pgvector nutzen statt Docker |
-| `--uninstall` | Registrierung und Regeldatei entfernen, Container stoppen (Daten bleiben) |
-| `--uninstall --purge` | zusaetzlich Daten-Volume und `.env` loeschen |
+| `--yes` | no questions asked |
+| `--no-claude` | skip the Claude integration |
+| `--no-ollama` | do not pull a model |
+| `--embedding openai` | OpenAI instead of Ollama (`OPENAI_API_KEY` in the environment) |
+| `--database-url URL` | use an existing Postgres with pgvector instead of Docker |
+| `--uninstall` | remove registration, hooks and rules file, stop containers (data is kept) |
+| `--uninstall --purge` | additionally delete the data volume and `.env` |
 
-### Gemeinsamer Server
+### Shared server
 
-Mehrere Personen koennen sich eine zentrale Datenbank teilen: Postgres mit pgvector auf einem Server
-betreiben und bei jedem Nutzer `./install.sh --database-url postgres://...` ausfuehren. Alle muessen
-dasselbe Embedding-Modell verwenden. Der MCP-Server selbst laeuft weiterhin lokal pro Nutzer (stdio).
-Die Datenbank sollte dann nur ueber TLS und mit eigenem Passwort erreichbar sein.
+Several people can share a central database: run Postgres with pgvector on a server and run
+`./install.sh --database-url postgres://...` for each user. Everyone must use the same embedding model.
+The MCP server itself still runs locally per user (stdio). The database should then only be reachable
+over TLS and with its own password.
 
-### Manuelle Installation
+### Manual installation
 
 ```bash
 cp .env.example .env && docker compose up -d
@@ -49,105 +49,106 @@ ollama pull nomic-embed-text
 go build -o bin/knowledge-base-mcp ./cmd/knowledge-base-mcp
 claude mcp add knowledge-base --scope user -- "$PWD/bin/knowledge-base-mcp"
 cp claude/rules/knowledge-base.md ~/.claude/rules/
+bin/knowledge-base-mcp install-hooks
 ```
 
-Anderes Embedding-Modell (z.B. OpenAI): `EMBEDDING_*` in `.env` anpassen, siehe `.env.example`.
-Claude Desktop: gleicher Befehl als Eintrag in `claude_desktop_config.json`.
+Different embedding model (e.g. OpenAI): adjust `EMBEDDING_*` in `.env`, see `.env.example`.
+Claude Desktop: the same command as an entry in `claude_desktop_config.json`.
 
 ## Tools
 
-| Tool | Zweck |
+| Tool | Purpose |
 |---|---|
-| `remember` | Kurzen Fakt merken. Liefert aehnliche bestehende Eintraege zurueck, damit Widersprueche erkannt werden. Mit `supersedes` ersetzt er alte Eintraege. |
-| `supersede` | Eintraege als veraltet markieren (Korrektur). Sie werden nicht mehr gefunden, bleiben aber als Historie. |
-| `search_knowledge` | Hybrid-Suche (nur aktive Eintraege), mit `project` = Projekt + projektuebergreifendes Wissen |
-| `list_documents` | Eintraege auflisten, z.B. "was wurde zuletzt gelernt" (`include_superseded` zeigt auch Veraltetes) |
-| `get_document` | Eintrag per ID lesen |
-| `add_document` | Laengeres Dokument speichern. Gleiche `source` ersetzt das alte. |
-| `delete_document` | Endgueltig loeschen (fuer Korrekturen `supersede` nutzen) |
+| `remember` | Remember a short fact. Returns similar existing entries so that contradictions are noticed. With `supersedes` it replaces old entries. |
+| `supersede` | Mark entries as outdated (correction). They are no longer found but are kept as history. |
+| `search_knowledge` | Hybrid search (active entries only); with `project` = that project + cross-project knowledge |
+| `list_documents` | List entries, e.g. "what was learned recently" (`include_superseded` also shows outdated ones) |
+| `get_document` | Read an entry by ID |
+| `add_document` | Store a longer document. The same `source` replaces the old one. |
+| `delete_document` | Delete permanently (use `supersede` for corrections) |
 
-Eintraege haben ein optionales `project` (leer = projektuebergreifend), einen `kind` (`fact`/`document`)
-und einen `status` (`active`/`superseded`). Texte mit offensichtlichen Secrets (Keys, Tokens, Passwoerter)
-werden abgelehnt.
+Entries have an optional `project` (empty = cross-project), a `kind` (`fact`/`document`)
+and a `status` (`active`/`superseded`). Texts containing obvious secrets (keys, tokens, passwords)
+are rejected.
 
-## Automatisches Abrufen (Hooks)
+## Automatic retrieval (hooks)
 
-Ein Claude-Code-Hook (`UserPromptSubmit`, `bin/knowledge-base-mcp hook`) speist zu einer konkreten Aufgabe
-passendes Wissen automatisch in den Kontext ein: die bis zu 4 passendsten Eintraege zum Prompt
-(Projekt + projektuebergreifend). Kurze Prompts (< 20 Zeichen) und Slash-Commands werden uebersprungen; was
-in der Session schon eingespeist wurde, kommt nicht nochmal. Bewusst gibt es keinen Hook bei Sitzungsbeginn:
-Wissen soll aufgabenbezogen abgerufen werden, nicht pauschal. Der Hook ist nur eine Absicherung; das eigentliche
-Nachschlagen steuert die Regeldatei (Claude sucht selbst, wenn eine Aufgabe es erfordert).
+A Claude Code hook (`UserPromptSubmit`, `bin/knowledge-base-mcp hook`) automatically feeds knowledge matching a
+concrete task into the context: the up to 4 best-matching entries for the prompt (project + cross-project).
+Short prompts (< 20 characters) and slash commands are skipped; whatever was already injected in the session
+is not injected again. There is deliberately no hook at session start: knowledge should be retrieved per task,
+not wholesale. The hook is only a safety net; the lookup itself is driven by the rules file (Claude searches on
+its own when a task calls for it).
 
-Ein Hook stoert nie die Sitzung: bei Fehlern (Postgres aus, Ollama nicht erreichbar, Timeout 8 s) bleibt er
-still und beendet sich mit Exit-Code 0. Ein Aufruf dauert typischerweise unter 100 ms.
+A hook never disturbs the session: on errors (Postgres down, Ollama unreachable, timeout of 8 s) it stays
+silent and exits with code 0. A call typically takes under 100 ms.
 
 ```bash
-bin/knowledge-base-mcp install-hooks     # in ~/.claude/settings.json eintragen (Backup: settings.json.kb-backup)
-bin/knowledge-base-mcp uninstall-hooks   # nur die eigenen Eintraege entfernen
+bin/knowledge-base-mcp install-hooks     # add to ~/.claude/settings.json (backup: settings.json.kb-backup)
+bin/knowledge-base-mcp uninstall-hooks   # remove only our own entries
 ```
 
-Der Installer macht das automatisch mit. Bestehende Hooks und die Reihenfolge der Schluessel bleiben erhalten;
-nach Aenderungen Claude Code neu starten.
+The installer does this automatically. Existing hooks and the key order are preserved;
+restart Claude Code after changes.
 
-Relevanzfilter: Es werden nur Treffer mit Cosine-Aehnlichkeit >= 0.67 eingespeist (`KB_HOOK_MIN_SIM`).
-Der Wert ist fuer `nomic-embed-text` kalibriert (themenfremde Prompts erreichen etwa 0.55-0.66, passende
-0.67-0.77) und verpasst absichtlich lieber einen Treffer, als bei jedem Prompt Rauschen einzublenden.
-Fehlersuche: `KB_HOOK_DEBUG=1` gibt alle Kandidaten mit Aehnlichkeit auf stderr aus, z.B.
+Relevance filter: only hits with a cosine similarity >= 0.67 are injected (`KB_HOOK_MIN_SIM`).
+The value is calibrated for `nomic-embed-text` (unrelated prompts reach about 0.55-0.66, matching ones
+0.67-0.77) and deliberately prefers missing a hit over showing noise on every prompt.
+Troubleshooting: `KB_HOOK_DEBUG=1` prints all candidates with their similarity to stderr, e.g.
 
 ```bash
-echo '{"session_id":"t","cwd":"/pfad/zum/repo","hook_event_name":"UserPromptSubmit","prompt":"..."}' \
+echo '{"session_id":"t","cwd":"/path/to/repo","hook_event_name":"UserPromptSubmit","prompt":"..."}' \
   | KB_HOOK_DEBUG=1 bin/knowledge-base-mcp hook
 ```
 
-## Lernen am Sitzungsende (Sicherheitsnetz)
+## Learning at session end (safety net)
 
-Zusaetzlich zum sofortigen `remember` waehrend der Sitzung wertet ein `SessionEnd`-Hook das Transkript aus:
+In addition to the immediate `remember` during the session, a `SessionEnd` hook evaluates the transcript:
 
-1. Der Hook startet einen abgekoppelten Hintergrundprozess (`bin/knowledge-base-mcp extract`) und kehrt sofort zurueck,
-   das Beenden der Sitzung wird nicht verzoegert.
-2. Der Prozess liest nur Nachrichten von dir und Claudes Text (keine Tool-Ausgaben, keine Subagenten, keine
-   Systemmeldungen). Sitzungen mit weniger als 3 Nutzer-Nachrichten werden uebersprungen, sehr lange auf 100.000
-   Zeichen gekuerzt, wiederaufgenommene Sitzungen nur ab der zuletzt ausgewerteten Zeile.
-3. Ein schlanker `claude -p`-Lauf (Modell `sonnet`, ohne Tools, MCP, Hooks und Settings) extrahiert Korrekturen,
-   Praeferenzen/Entscheidungen und verifizierte, nicht aus dem Code ablesbare Fakten. Der Prompt ist bewusst
-   streng: lieber 0-2 starke Fakten als viele schwache.
-4. Jeder Fakt wird gegen die Knowledge Base geprueft: Aehnlichkeit >= 0.92 gilt als bekannt und wird verworfen,
-   zwischen 0.78 und 0.92 entscheidet ein zweiter Modell-Aufruf `add`, `skip` oder `supersede` (nur mit IDs, die
-   ihm vorgelegt wurden; im Zweifel `skip`). Secrets werden herausgefiltert.
-5. Gespeicherte Eintraege tragen den Tag `auto`; Korrekturen zusaetzlich `korrektur`. Pruefen:
-   `list_documents` mit `tag: auto`, oder `tail ~/Library/Caches/knowledge-base/extract.log` (Linux: `~/.cache/knowledge-base/`).
+1. The hook starts a detached background process (`bin/knowledge-base-mcp extract`) and returns immediately,
+   so ending the session is not delayed.
+2. The process reads only your messages and Claude's text (no tool output, no subagents, no system
+   messages). Sessions with fewer than 3 user messages are skipped, very long ones are cut to 100,000
+   characters, and resumed sessions are evaluated only from the last evaluated line onwards.
+3. A lean `claude -p` run (model `sonnet`, without tools, MCP, hooks and settings) extracts corrections,
+   preferences/decisions and verified facts that cannot be read from the code. The prompt is deliberately
+   strict: better 0-2 strong facts than many weak ones.
+4. Every fact is checked against the knowledge base: similarity >= 0.92 counts as known and is discarded;
+   between 0.78 and 0.92 a second model call decides `add`, `skip` or `supersede` (only with IDs that were
+   presented to it; when in doubt `skip`). Secrets are filtered out.
+5. Stored entries carry the tag `auto`; corrections additionally `correction`. To review:
+   `list_documents` with `tag: auto`, or `tail ~/Library/Caches/knowledge-base/extract.log` (Linux: `~/.cache/knowledge-base/`).
 
-Die Auswertung nutzt dein Claude-Abo bzw. deinen API-Zugang (typisch wenige Cent je langer Sitzung); das
-Transkript geht dabei an denselben Anbieter wie deine normale Sitzung. Ein Schutz verhindert, dass der
-Hintergrundlauf selbst wieder Auswertungen oder Hooks ausloest.
+The evaluation uses your Claude subscription or API access (typically a few cents per long session); the
+transcript goes to the same provider as your regular session. A guard prevents the background run from
+triggering evaluations or hooks itself.
 
-| Einstellung (`.env` oder Umgebung) | Wirkung |
+| Setting (`.env` or environment) | Effect |
 |---|---|
-| `KB_AUTO_LEARN=0` | Auswertung am Sitzungsende ausschalten (Hook bleibt eingetragen, tut dann nichts) |
-| `KB_EXTRACT_MODEL` | Modell fuer die Auswertung (Standard `sonnet`) |
-| `KB_CLAUDE_BIN` | Pfad zur `claude`-CLI, falls nicht im `PATH` |
+| `KB_AUTO_LEARN=0` | disable the evaluation at session end (the hook stays registered but does nothing) |
+| `KB_EXTRACT_MODEL` | model used for the evaluation (default `sonnet`) |
+| `KB_CLAUDE_BIN` | path to the `claude` CLI if it is not on the `PATH` |
 
-Manuell testen, ohne zu speichern:
+Test manually without storing anything:
 
 ```bash
-bin/knowledge-base-mcp extract --transcript ~/.claude/projects/<projekt>/<session>.jsonl \
-  --session test --project mein-projekt --dry-run
+bin/knowledge-base-mcp extract --transcript ~/.claude/projects/<project>/<session>.jsonl \
+  --session test --project my-project --dry-run
 ```
 
-Nicht abgedeckt: Sitzungen, die hart beendet werden (Terminal geschlossen, Absturz), loesen evtl. kein
-`SessionEnd` aus. Unter Windows ist die Hintergrundauswertung nicht implementiert.
+Not covered: sessions that are terminated abruptly (terminal closed, crash) may not trigger
+`SessionEnd`. On Windows the background evaluation is not implemented.
 
-## Automatisches Lernen
+## Automatic learning
 
-Das Verhalten steuert die Regeldatei `claude/rules/knowledge-base.md` (vom Installer nach `~/.claude/rules/` kopiert) (wird von Claude Code automatisch
-geladen): bei Aufgaben erst suchen, bei Korrekturen/Entscheidungen/Erkenntnissen sofort `remember`,
-veraltete Eintraege per `supersede` ersetzen.
+The behavior is controlled by the rules file `claude/rules/knowledge-base.md` (copied by the installer to
+`~/.claude/rules/` and loaded automatically by Claude Code): search first when working on a task, call
+`remember` immediately on corrections/decisions/findings, replace outdated entries via `supersede`.
 
-## Hinweise
+## Notes
 
-- **Embedding-Modell nicht nachtraeglich wechseln.** Die Vektordimension wird beim ersten Start im Schema fixiert; der Server bricht bei abweichendem `EMBEDDING_DIM` ab. Bei einem Modellwechsel Volume loeschen (`docker compose down -v`) und neu einlesen.
-- Der Server nutzt jeden OpenAI-kompatiblen `/embeddings`-Endpunkt (Ollama, OpenAI, LM Studio, vLLM).
-- Daten liegen im Docker-Volume `kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
-- Postgres ist nur an `127.0.0.1` gebunden. Die Default-Zugangsdaten (`kb`/`kb`) sind nur fuer lokale Nutzung gedacht.
+- **Do not change the embedding model afterwards.** The vector dimension is fixed in the schema on first start; the server aborts if `EMBEDDING_DIM` differs. When switching models, delete the volume (`docker compose down -v`) and re-ingest.
+- The server works with any OpenAI-compatible `/embeddings` endpoint (Ollama, OpenAI, LM Studio, vLLM).
+- Data lives in the Docker volume `kb-pgdata`. Backup: `docker exec knowledge-base-postgres pg_dump -U kb knowledge_base > backup.sql`
+- Postgres is bound to `127.0.0.1` only. The default credentials (`kb`/`kb`) are meant for local use only.
 - Tests: `go test ./...`

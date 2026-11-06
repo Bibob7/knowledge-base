@@ -1,4 +1,4 @@
-// Package store kapselt den Zugriff auf Postgres/pgvector.
+// Package store encapsulates access to Postgres/pgvector.
 package store
 
 import (
@@ -18,7 +18,7 @@ type Store struct {
 	dim  int
 }
 
-// OpenReadOnly verbindet ohne Migration (schnell, fuer Hooks).
+// OpenReadOnly connects without running migrations (fast, for hooks).
 func OpenReadOnly(ctx context.Context, url string, dim int) (*Store, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -26,7 +26,7 @@ func OpenReadOnly(ctx context.Context, url string, dim int) (*Store, error) {
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("datenbank nicht erreichbar (laeuft 'docker compose up -d'?): %w", err)
+		return nil, fmt.Errorf("database not reachable (is 'docker compose up -d' running?): %w", err)
 	}
 	return &Store{pool: pool, dim: dim}, nil
 }
@@ -82,46 +82,46 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("migration: %w", err)
 		}
 	}
-	// Dimension der bestehenden Tabelle muss zur Konfiguration passen.
+	// The dimension of the existing table must match the configuration.
 	var typmod int
 	err := s.pool.QueryRow(ctx, `SELECT atttypmod FROM pg_attribute
 		WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'`).Scan(&typmod)
 	if err != nil {
-		return fmt.Errorf("dimension pruefen: %w", err)
+		return fmt.Errorf("checking dimension: %w", err)
 	}
 	if typmod != s.dim {
-		return fmt.Errorf("EMBEDDING_DIM=%d, die Datenbank wurde aber mit Dimension %d angelegt "+
-			"(Modellwechsel erfordert neues Schema/Re-Indexierung)", s.dim, typmod)
+		return fmt.Errorf("EMBEDDING_DIM=%d, but the database was created with dimension %d "+
+			"(switching models requires a new schema/re-indexing)", s.dim, typmod)
 	}
 	return nil
 }
 
-// ChunkInput ist ein Textstueck samt Embedding.
+// ChunkInput is a piece of text together with its embedding.
 type ChunkInput struct {
 	Content   string
 	Embedding []float32
 }
 
-// DocumentInput beschreibt ein neues Dokument bzw. einen neuen Fakt.
+// DocumentInput describes a new document or a new fact.
 type DocumentInput struct {
 	Title      string
 	Source     string
-	Project    string // leer = projektuebergreifend
-	Kind       string // "document" oder "fact"
+	Project    string // empty = cross-project
+	Kind       string // "document" or "fact"
 	Tags       []string
-	Supersedes []int64 // aktive Eintraege, die dieser hier ersetzt
+	Supersedes []int64 // active entries that this one replaces
 	Chunks     []ChunkInput
 }
 
 type AddResult struct {
 	ID         int64
-	Replaced   bool    // vorhandenes Dokument gleicher source wurde ersetzt
-	Superseded []int64 // tatsaechlich als veraltet markierte Eintraege
+	Replaced   bool    // an existing document with the same source was replaced
+	Superseded []int64 // entries that were actually marked as outdated
 }
 
-// AddDocument speichert ein Dokument. Existiert bereits ein aktives mit
-// gleicher source, wird es ersetzt (Re-Ingest). Eintraege in Supersedes werden
-// als veraltet markiert (und bleiben fuer die Historie erhalten).
+// AddDocument stores a document. If an active one with the same source already
+// exists, it is replaced (re-ingest). Entries in Supersedes are marked as
+// outdated (and kept as history).
 func (s *Store) AddDocument(ctx context.Context, in DocumentInput) (AddResult, error) {
 	var res AddResult
 	if in.Tags == nil {
@@ -197,7 +197,7 @@ RETURNING id`, oldIDs, newID)
 	return ids, rows.Err()
 }
 
-// Supersede markiert oldIDs als durch newID ersetzt. newID muss aktiv sein.
+// Supersede marks oldIDs as replaced by newID. newID must be active.
 func (s *Store) Supersede(ctx context.Context, oldIDs []int64, newID int64) ([]int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -213,7 +213,7 @@ func (s *Store) Supersede(ctx context.Context, oldIDs []int64, newID int64) ([]i
 		return nil, err
 	}
 	if status != "active" {
-		return nil, fmt.Errorf("new_id %d ist selbst nicht aktiv (%s)", newID, status)
+		return nil, fmt.Errorf("new_id %d is itself not active (%s)", newID, status)
 	}
 	ids, err := markSuperseded(ctx, tx, oldIDs, newID)
 	if err != nil {
@@ -231,11 +231,11 @@ type SimilarEntry struct {
 	Similarity float64
 }
 
-// Similar liefert die aehnlichsten aktiven Eintraege (je Dokument der beste
-// Chunk) im Scope des Projekts plus globaler Eintraege.
+// Similar returns the most similar active entries (best chunk per document)
+// within the scope of the project plus global entries.
 func (s *Store) Similar(ctx context.Context, embedding []float32, project string, exclude []int64, limit int) ([]SimilarEntry, error) {
 	if exclude == nil {
-		exclude = []int64{} // nil wuerde als NULL kodiert und alle Zeilen ausfiltern
+		exclude = []int64{} // nil would be encoded as NULL and filter out all rows
 	}
 	rows, err := s.pool.Query(ctx, `
 SELECT d.id, d.title, COALESCE(d.project, ''), d.kind, c.content,
@@ -279,10 +279,10 @@ type SearchHit struct {
 	ChunkIndex int
 	Content    string
 	Score      float64
-	Sim        float64 // Cosine-Aehnlichkeit des Chunks zur Anfrage (absolut, anders als Score)
+	Sim        float64 // cosine similarity of the chunk to the query (absolute, unlike Score)
 }
 
-// Search kombiniert Vektor- und Volltextsuche per Reciprocal Rank Fusion.
+// Search combines vector and full-text search via Reciprocal Rank Fusion.
 func (s *Store) Search(ctx context.Context, query string, embedding []float32, project string, tags []string, limit int) ([]SearchHit, error) {
 	if len(tags) == 0 {
 		tags = nil
@@ -372,9 +372,9 @@ type Document struct {
 	Content string
 }
 
-var ErrNotFound = errors.New("dokument nicht gefunden")
+var ErrNotFound = errors.New("document not found")
 
-// GetDocument rekonstruiert den Text aus den Chunks (Ueberlappungen inklusive).
+// GetDocument reconstructs the text from the chunks (overlaps included).
 func (s *Store) GetDocument(ctx context.Context, id int64) (*Document, error) {
 	var d Document
 	err := s.pool.QueryRow(ctx,

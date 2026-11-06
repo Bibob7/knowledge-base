@@ -11,7 +11,7 @@ Omit `project` on `remember` for cross-project knowledge (user preferences, gene
 Pass `project` on `search_knowledge` to get that project's entries plus the cross-project ones.
 
 ## Retrieve
-- A hook may inject entries that match the user's prompt as context headed "Wissen aus der knowledge-base".
+- A hook may inject entries that match the user's prompt as context headed "Knowledge from the knowledge base".
   Use them directly; do not repeat the same search. The injection is only a similarity filter and can miss
   things, so still search explicitly when a task needs prior decisions or conventions and nothing relevant was
   injected. Nothing is injected at session start: look up knowledge when the task calls for it.
@@ -33,7 +33,7 @@ Rules for entries:
   Include the *why* when known. Mention the project in the text if it is project-specific.
 - Do NOT store: anything derivable from code or git history, transient task state, speculation,
   secrets/credentials, personal data beyond work preferences.
-- After saving, mention it in one short line (e.g. "Gemerkt: ..."), not more.
+- After saving, mention it in one short line in the user's language (e.g. "Noted: ..."), not more.
 
 A SessionEnd hook also extracts learnings from the transcript afterwards (entries tagged `auto`). That is only a
 safety net: still call `remember` immediately for corrections, preferences and decisions, and do not wait for it.

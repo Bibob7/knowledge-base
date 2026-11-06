@@ -1,4 +1,4 @@
-// Package embed ist ein Client fuer OpenAI-kompatible /embeddings-Endpunkte
+// Package embed is a client for OpenAI-compatible /embeddings endpoints
 // (OpenAI, Ollama, LM Studio, vLLM, ...).
 package embed
 
@@ -31,7 +31,7 @@ func New(baseURL, model, apiKey string, dim int) *Client {
 
 const batchSize = 32
 
-// Embed liefert pro Eingabetext einen Vektor (gleiche Reihenfolge).
+// Embed returns one vector per input text (same order).
 func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error) {
 	out := make([][]float32, 0, len(inputs))
 	for i := 0; i < len(inputs); i += batchSize {
@@ -60,7 +60,7 @@ func (c *Client) embedBatch(ctx context.Context, inputs []string) ([][]float32, 
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("embedding-request: %w", err)
+		return nil, fmt.Errorf("embedding request: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
@@ -68,7 +68,7 @@ func (c *Client) embedBatch(ctx context.Context, inputs []string) ([][]float32, 
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("embedding-api status %d: %s", resp.StatusCode, truncate(string(raw), 300))
+		return nil, fmt.Errorf("embedding API status %d: %s", resp.StatusCode, truncate(string(raw), 300))
 	}
 	var parsed struct {
 		Data []struct {
@@ -77,18 +77,18 @@ func (c *Client) embedBatch(ctx context.Context, inputs []string) ([][]float32, 
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("embedding-antwort: %w", err)
+		return nil, fmt.Errorf("embedding response: %w", err)
 	}
 	if len(parsed.Data) != len(inputs) {
-		return nil, fmt.Errorf("embedding-api lieferte %d Vektoren fuer %d Eingaben", len(parsed.Data), len(inputs))
+		return nil, fmt.Errorf("embedding API returned %d vectors for %d inputs", len(parsed.Data), len(inputs))
 	}
 	vecs := make([][]float32, len(inputs))
 	for _, d := range parsed.Data {
 		if d.Index < 0 || d.Index >= len(vecs) {
-			return nil, fmt.Errorf("ungueltiger index %d in embedding-antwort", d.Index)
+			return nil, fmt.Errorf("invalid index %d in embedding response", d.Index)
 		}
 		if len(d.Embedding) != c.dim {
-			return nil, fmt.Errorf("modell %q liefert Dimension %d, konfiguriert ist EMBEDDING_DIM=%d",
+			return nil, fmt.Errorf("model %q returns dimension %d, but EMBEDDING_DIM=%d is configured",
 				c.model, len(d.Embedding), c.dim)
 		}
 		vecs[d.Index] = d.Embedding

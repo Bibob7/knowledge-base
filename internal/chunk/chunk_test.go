@@ -20,7 +20,7 @@ func TestSplitParagraphsAndOverlap(t *testing.T) {
 	if !strings.HasSuffix(got[0], "a") || !strings.Contains(got[1], "b") {
 		t.Fatalf("unexpected chunks: %v", got)
 	}
-	// Ueberlappung: Ende von Chunk 0 taucht am Anfang von Chunk 1 auf.
+	// Overlap: the end of chunk 0 shows up at the start of chunk 1.
 	if !strings.HasPrefix(got[1], strings.Repeat("a", 10)) {
 		t.Fatalf("missing overlap: %q", got[1])
 	}

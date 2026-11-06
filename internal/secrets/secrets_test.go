@@ -12,17 +12,17 @@ func TestCheck(t *testing.T) {
 	}
 	for _, s := range bad {
 		if Check(s) == nil {
-			t.Errorf("sollte abgelehnt werden: %q", s)
+			t.Errorf("should be rejected: %q", s)
 		}
 	}
 	good := []string{
-		"Wir nutzen pgx statt database/sql",
-		"Das Passwort wird per Env-Variable gesetzt",
-		"Der Token-Endpunkt liegt unter /oauth/token",
+		"We use pgx instead of database/sql",
+		"The password is set via an environment variable",
+		"The token endpoint lives at /oauth/token",
 	}
 	for _, s := range good {
 		if err := Check(s); err != nil {
-			t.Errorf("faelschlich abgelehnt %q: %v", s, err)
+			t.Errorf("wrongly rejected %q: %v", s, err)
 		}
 	}
 }

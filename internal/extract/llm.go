@@ -11,18 +11,18 @@ import (
 	"strings"
 )
 
-// Runner fuehrt einen einzelnen Modell-Aufruf aus (system = Anweisung, user = Daten).
+// Runner executes a single model call (system = instruction, user = data).
 type Runner interface {
 	Run(ctx context.Context, system, user string) (string, error)
 }
 
-// ClaudeCLI nutzt das lokale 'claude -p' (headless, ohne Tools, MCP, Hooks, Settings).
+// ClaudeCLI uses the local 'claude -p' (headless, without tools, MCP, hooks, settings).
 type ClaudeCLI struct {
-	Bin   string // leer = automatisch suchen
+	Bin   string // empty = auto-detect
 	Model string
 }
 
-// GuardEnv verhindert, dass der Hintergrundlauf selbst wieder Extraktionen ausloest.
+// GuardEnv prevents the background run from triggering further extractions.
 const GuardEnv = "KB_EXTRACTING"
 
 func (c ClaudeCLI) Run(ctx context.Context, system, user string) (string, error) {
@@ -38,7 +38,7 @@ func (c ClaudeCLI) Run(ctx context.Context, system, user string) (string, error)
 		model = "sonnet"
 	}
 	cmd := exec.CommandContext(ctx, bin,
-		"-p", "Befolge die Anweisung im System-Prompt und antworte ausschliesslich mit dem geforderten JSON.",
+		"-p", "Follow the instruction in the system prompt and reply with the requested JSON only.",
 		"--system-prompt", system,
 		"--model", model,
 		"--tools", "",
@@ -48,7 +48,7 @@ func (c ClaudeCLI) Run(ctx context.Context, system, user string) (string, error)
 		"--setting-sources", "",
 		"--output-format", "json",
 	)
-	cmd.Dir = os.TempDir() // neutral: kein Projekt-CLAUDE.md, keine Projekt-Hooks
+	cmd.Dir = os.TempDir() // neutral: no project CLAUDE.md, no project hooks
 	cmd.Env = append(os.Environ(), GuardEnv+"=1")
 	cmd.Stdin = strings.NewReader(user)
 	var stderr bytes.Buffer
@@ -62,10 +62,10 @@ func (c ClaudeCLI) Run(ctx context.Context, system, user string) (string, error)
 		IsError bool   `json:"is_error"`
 	}
 	if err := json.Unmarshal(out, &res); err != nil {
-		return "", fmt.Errorf("claude -p lieferte kein JSON: %w", err)
+		return "", fmt.Errorf("claude -p returned no JSON: %w", err)
 	}
 	if res.IsError {
-		return "", fmt.Errorf("claude -p meldet Fehler: %s", truncateRunes(res.Result, 300))
+		return "", fmt.Errorf("claude -p reported an error: %s", truncateRunes(res.Result, 300))
 	}
 	return res.Result, nil
 }
@@ -87,5 +87,5 @@ func findClaude() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("claude CLI nicht gefunden (KB_CLAUDE_BIN setzen)")
+	return "", fmt.Errorf("claude CLI not found (set KB_CLAUDE_BIN)")
 }

@@ -1,5 +1,5 @@
-// knowledge-base-mcp ist ein MCP-Server (stdio) fuer eine Wissensdatenbank auf
-// Basis von Postgres/pgvector mit Hybrid-Suche (Vektor + Volltext).
+// knowledge-base-mcp is an MCP server (stdio) for a knowledge base built on
+// Postgres/pgvector with hybrid search (vector + full text).
 package main
 
 import (
@@ -29,7 +29,7 @@ type app struct {
 }
 
 func main() {
-	// stdout gehoert dem MCP-Protokoll, Logs gehen nach stderr.
+	// stdout belongs to the MCP protocol, logs go to stderr.
 	log.SetOutput(os.Stderr)
 	log.SetPrefix("knowledge-base-mcp: ")
 
@@ -72,46 +72,46 @@ func run() error {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",
-		Description: "Merkt sich einen kurzen, atomaren Fakt (1-5 Saetze): Korrekturen des Nutzers, Entscheidungen samt Begruendung, " +
-			"Projektkonventionen, Praeferenzen, verifizierte Erkenntnisse. Ein Fakt pro Aufruf. " +
-			"Die Antwort enthaelt aehnliche bestehende Eintraege ('similar'). Widerspricht einer davon dem neuen Fakt oder ist " +
-			"er veraltet, ruf supersede auf (oder uebergib beim naechsten remember 'supersedes'), damit nichts Falsches stehen bleibt.",
+		Description: "Remembers a short, atomic fact (1-5 sentences): corrections by the user, decisions including their reasoning, " +
+			"project conventions, preferences, verified findings. One fact per call. " +
+			"The response contains similar existing entries ('similar'). If one of them contradicts the new fact or is " +
+			"outdated, call supersede (or pass 'supersedes' to remember), so that nothing wrong is left behind.",
 	}, a.remember)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "supersede",
-		Description: "Markiert bestehende Eintraege als veraltet, weil sie durch einen neuen Eintrag ersetzt wurden " +
-			"(Korrektur). Veraltete Eintraege werden nicht mehr gefunden, bleiben aber als Historie erhalten.",
+		Description: "Marks existing entries as outdated because a new entry replaces them (correction). " +
+			"Outdated entries are no longer found by search but are kept as history.",
 	}, a.supersede)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "add_document",
-		Description: "Speichert ein laengeres Dokument (wird gechunkt und eingebettet). Fuer kurze Fakten stattdessen remember nutzen. " +
-			"Ist 'source' gesetzt und existiert bereits ein aktives Dokument mit derselben source, wird es ersetzt.",
+		Description: "Stores a longer document (it is chunked and embedded). For short facts use remember instead. " +
+			"If 'source' is set and an active document with the same source already exists, it is replaced.",
 	}, a.addDocument)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "search_knowledge",
-		Description: "Durchsucht die Knowledge Base per Hybrid-Suche (semantisch + Stichwort) nach aktuellem Wissen. " +
-			"Mit 'project' werden Eintraege dieses Projekts plus projektuebergreifende gefunden.",
+		Description: "Searches the knowledge base for current knowledge using hybrid search (semantic + keyword). " +
+			"With 'project', entries of that project plus cross-project entries are found.",
 	}, a.search)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_documents",
-		Description: "Listet Eintraege (zuletzt geaenderte zuerst), optional nach Projekt/Tag gefiltert. Zeigt, was zuletzt gelernt wurde.",
+		Description: "Lists entries (most recently changed first), optionally filtered by project/tag. Shows what was learned recently.",
 	}, a.listDocuments)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_document",
-		Description: "Liefert den Inhalt eines Eintrags anhand seiner ID (auch veraltete).",
+		Description: "Returns the content of an entry by its ID (including outdated ones).",
 	}, a.getDocument)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete_document",
-		Description: "Loescht einen Eintrag endgueltig samt Chunks. Fuer Korrekturen stattdessen supersede nutzen; loeschen nur bei Unsinn oder auf Wunsch.",
+		Description: "Permanently deletes an entry including its chunks. For corrections use supersede instead; delete only junk or on request.",
 	}, a.deleteDocument)
 
-	log.Printf("bereit (modell=%s, dim=%d)", cfg.EmbeddingModel, cfg.EmbeddingDim)
+	log.Printf("ready (model=%s, dim=%d)", cfg.EmbeddingModel, cfg.EmbeddingDim)
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
@@ -119,7 +119,7 @@ func run() error {
 }
 
 const (
-	// nomic-embed-text hat ein hohes Grundrauschen (~0.7 bei themenfremden Saetzen).
+	// nomic-embed-text has a high noise floor (~0.7 for unrelated sentences).
 	similarThreshold = 0.78
 	similarLimit     = 4
 )
@@ -141,9 +141,9 @@ func (a *app) embedDocs(ctx context.Context, content string) ([]store.ChunkInput
 	return chunks, nil
 }
 
-// check prueft Datenbank und Embedding-Modell und beendet sich (fuer Installer/Fehlersuche).
+// check verifies the database and the embedding model and exits (for the installer/troubleshooting).
 func (a *app) check(ctx context.Context) error {
-	fmt.Fprintf(os.Stderr, "datenbank: ok (schema bereit, dim=%d)\n", a.cfg.EmbeddingDim)
+	fmt.Fprintf(os.Stderr, "database: ok (schema ready, dim=%d)\n", a.cfg.EmbeddingDim)
 	if _, err := a.embed.Embed(ctx, []string{"healthcheck"}); err != nil {
 		return fmt.Errorf("embedding (%s @ %s): %w", a.cfg.EmbeddingModel, a.cfg.EmbeddingBaseURL, err)
 	}
@@ -154,11 +154,11 @@ func (a *app) check(ctx context.Context) error {
 // --- remember ---
 
 type rememberIn struct {
-	Content    string   `json:"content" jsonschema:"Der Fakt als eigenstaendiger Text (1-5 Saetze), auch ohne Kontext verstaendlich; Begruendung (Warum) mitschreiben"`
-	Title      string   `json:"title,omitempty" jsonschema:"Optionaler kurzer Titel; sonst wird er aus dem Text abgeleitet"`
-	Project    string   `json:"project,omitempty" jsonschema:"Projektname (Name des Git-Repos); leer = projektuebergreifendes Wissen (Praeferenzen, Allgemeines)"`
-	Tags       []string `json:"tags,omitempty" jsonschema:"Optionale Tags"`
-	Supersedes []int64  `json:"supersedes,omitempty" jsonschema:"IDs bestehender Eintraege, die durch diesen Fakt ersetzt/korrigiert werden"`
+	Content    string   `json:"content" jsonschema:"The fact as self-contained text (1-5 sentences), understandable without context; include the reasoning (why)"`
+	Title      string   `json:"title,omitempty" jsonschema:"Optional short title; otherwise derived from the text"`
+	Project    string   `json:"project,omitempty" jsonschema:"Project name (name of the git repo); empty = cross-project knowledge (preferences, general facts)"`
+	Tags       []string `json:"tags,omitempty" jsonschema:"Optional tags"`
+	Supersedes []int64  `json:"supersedes,omitempty" jsonschema:"IDs of existing entries that this fact replaces/corrects"`
 }
 
 type similarOut struct {
@@ -179,7 +179,7 @@ type rememberOut struct {
 func (a *app) remember(ctx context.Context, _ *mcp.CallToolRequest, in rememberIn) (*mcp.CallToolResult, rememberOut, error) {
 	content := strings.TrimSpace(in.Content)
 	if content == "" {
-		return nil, rememberOut{}, errors.New("content darf nicht leer sein")
+		return nil, rememberOut{}, errors.New("content must not be empty")
 	}
 	if err := secrets.Check(in.Title + "\n" + content); err != nil {
 		return nil, rememberOut{}, err
@@ -192,7 +192,7 @@ func (a *app) remember(ctx context.Context, _ *mcp.CallToolRequest, in rememberI
 	if err != nil {
 		return nil, rememberOut{}, err
 	}
-	// Aehnliche Eintraege vor dem Speichern ermitteln, damit der neue nicht sich selbst findet.
+	// Determine similar entries before storing, so the new entry does not find itself.
 	cands, err := a.store.Similar(ctx, chunks[0].Embedding, in.Project, in.Supersedes, similarLimit)
 	if err != nil {
 		return nil, rememberOut{}, err
@@ -212,8 +212,8 @@ func (a *app) remember(ctx context.Context, _ *mcp.CallToolRequest, in rememberI
 		out.Similar = append(out.Similar, similarOut{c.ID, c.Title, c.Project, round3(c.Similarity), snippet(c.Content, 300)})
 	}
 	if len(out.Similar) > 0 {
-		out.Hint = "Aehnliche Eintraege gefunden. Widerspricht oder veraltet einer davon durch den neuen Fakt, " +
-			"rufe supersede(old_ids=[...], new_id=" + strconv.FormatInt(res.ID, 10) + ") auf."
+		out.Hint = "Similar entries found. If one of them is contradicted or made outdated by the new fact, " +
+			"call supersede(old_ids=[...], new_id=" + strconv.FormatInt(res.ID, 10) + ")."
 	}
 	return nil, out, nil
 }
@@ -221,8 +221,8 @@ func (a *app) remember(ctx context.Context, _ *mcp.CallToolRequest, in rememberI
 // --- supersede ---
 
 type supersedeIn struct {
-	OldIDs []int64 `json:"old_ids" jsonschema:"IDs der veralteten Eintraege"`
-	NewID  int64   `json:"new_id" jsonschema:"ID des Eintrags, der sie ersetzt (muss aktiv sein)"`
+	OldIDs []int64 `json:"old_ids" jsonschema:"IDs of the outdated entries"`
+	NewID  int64   `json:"new_id" jsonschema:"ID of the entry that replaces them (must be active)"`
 }
 
 type supersedeOut struct {
@@ -231,7 +231,7 @@ type supersedeOut struct {
 
 func (a *app) supersede(ctx context.Context, _ *mcp.CallToolRequest, in supersedeIn) (*mcp.CallToolResult, supersedeOut, error) {
 	if len(in.OldIDs) == 0 {
-		return nil, supersedeOut{}, errors.New("old_ids darf nicht leer sein")
+		return nil, supersedeOut{}, errors.New("old_ids must not be empty")
 	}
 	ids, err := a.store.Supersede(ctx, in.OldIDs, in.NewID)
 	if err != nil {
@@ -243,11 +243,11 @@ func (a *app) supersede(ctx context.Context, _ *mcp.CallToolRequest, in supersed
 // --- add_document ---
 
 type addDocumentIn struct {
-	Title   string   `json:"title" jsonschema:"Titel des Dokuments"`
-	Content string   `json:"content" jsonschema:"Volltext des Dokuments (Markdown oder Text)"`
-	Source  string   `json:"source,omitempty" jsonschema:"Optionale eindeutige Quelle, z.B. URL oder Dateipfad; dient zum Ersetzen bei erneutem Einlesen"`
-	Project string   `json:"project,omitempty" jsonschema:"Projektname; leer = projektuebergreifend"`
-	Tags    []string `json:"tags,omitempty" jsonschema:"Optionale Tags zum Filtern"`
+	Title   string   `json:"title" jsonschema:"Title of the document"`
+	Content string   `json:"content" jsonschema:"Full text of the document (Markdown or plain text)"`
+	Source  string   `json:"source,omitempty" jsonschema:"Optional unique source, e.g. URL or file path; used to replace the document when it is ingested again"`
+	Project string   `json:"project,omitempty" jsonschema:"Project name; empty = cross-project"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"Optional tags for filtering"`
 }
 
 type addDocumentOut struct {
@@ -258,7 +258,7 @@ type addDocumentOut struct {
 
 func (a *app) addDocument(ctx context.Context, _ *mcp.CallToolRequest, in addDocumentIn) (*mcp.CallToolResult, addDocumentOut, error) {
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Content) == "" {
-		return nil, addDocumentOut{}, errors.New("title und content duerfen nicht leer sein")
+		return nil, addDocumentOut{}, errors.New("title and content must not be empty")
 	}
 	if err := secrets.Check(in.Title + "\n" + in.Content); err != nil {
 		return nil, addDocumentOut{}, err
@@ -279,10 +279,10 @@ func (a *app) addDocument(ctx context.Context, _ *mcp.CallToolRequest, in addDoc
 // --- search_knowledge ---
 
 type searchIn struct {
-	Query   string   `json:"query" jsonschema:"Suchanfrage in natuerlicher Sprache"`
-	Project string   `json:"project,omitempty" jsonschema:"Projektname: findet dieses Projekt plus projektuebergreifendes Wissen; leer = alles"`
-	Limit   int      `json:"limit,omitempty" jsonschema:"Maximale Trefferzahl (Standard 8, max 50)"`
-	Tags    []string `json:"tags,omitempty" jsonschema:"Nur Eintraege mit mindestens einem dieser Tags"`
+	Query   string   `json:"query" jsonschema:"Search query in natural language"`
+	Project string   `json:"project,omitempty" jsonschema:"Project name: finds this project plus cross-project knowledge; empty = everything"`
+	Limit   int      `json:"limit,omitempty" jsonschema:"Maximum number of hits (default 8, max 50)"`
+	Tags    []string `json:"tags,omitempty" jsonschema:"Only entries with at least one of these tags"`
 }
 
 type searchHit struct {
@@ -303,7 +303,7 @@ type searchOut struct {
 
 func (a *app) search(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, searchOut, error) {
 	if strings.TrimSpace(in.Query) == "" {
-		return nil, searchOut{}, errors.New("query darf nicht leer sein")
+		return nil, searchOut{}, errors.New("query must not be empty")
 	}
 	limit := clamp(in.Limit, 8, 50)
 	vecs, err := a.embed.Embed(ctx, []string{a.cfg.EmbeddingQueryPrefix + in.Query})
@@ -324,10 +324,10 @@ func (a *app) search(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (
 // --- list_documents ---
 
 type listIn struct {
-	Project           string `json:"project,omitempty" jsonschema:"Projekt plus projektuebergreifende Eintraege; leer = alle"`
-	Tag               string `json:"tag,omitempty" jsonschema:"Optionaler Tag-Filter"`
-	IncludeSuperseded bool   `json:"include_superseded,omitempty" jsonschema:"Auch veraltete Eintraege zeigen"`
-	Limit             int    `json:"limit,omitempty" jsonschema:"Maximale Anzahl (Standard 50, max 200)"`
+	Project           string `json:"project,omitempty" jsonschema:"Project plus cross-project entries; empty = all"`
+	Tag               string `json:"tag,omitempty" jsonschema:"Optional tag filter"`
+	IncludeSuperseded bool   `json:"include_superseded,omitempty" jsonschema:"Also show outdated entries"`
+	Limit             int    `json:"limit,omitempty" jsonschema:"Maximum number (default 50, max 200)"`
 }
 
 type docInfo struct {
@@ -367,7 +367,7 @@ func (a *app) listDocuments(ctx context.Context, _ *mcp.CallToolRequest, in list
 // --- get_document ---
 
 type idIn struct {
-	ID int64 `json:"id" jsonschema:"Dokument-ID"`
+	ID int64 `json:"id" jsonschema:"Document ID"`
 }
 
 type getOut struct {

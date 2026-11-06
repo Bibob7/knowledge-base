@@ -42,36 +42,36 @@ func TestInstallUninstallRoundtrip(t *testing.T) {
 	s := string(got)
 	for _, want := range []string{`"/other/tool"`, `rtk hook claude`, `"UserPromptSubmit"`, `"SessionEnd"`, cmd} {
 		if !strings.Contains(s, want) {
-			t.Errorf("fehlt nach Install: %s", want)
+			t.Errorf("missing after Install: %s", want)
 		}
 	}
-	// Reihenfolge der Top-Level-Keys bleibt erhalten.
+	// The order of the top-level keys is preserved.
 	if !(strings.Index(s, `"model"`) < strings.Index(s, `"hooks"`) && strings.Index(s, `"hooks"`) < strings.Index(s, `"tui"`)) {
-		t.Errorf("Key-Reihenfolge veraendert:\n%s", s)
+		t.Errorf("key order changed:\n%s", s)
 	}
 
 	if changed, err := Install(path, cmd); err != nil || changed {
-		t.Fatalf("zweiter install muss no-op sein: changed=%v err=%v", changed, err)
+		t.Fatalf("second install must be a no-op: changed=%v err=%v", changed, err)
 	}
 	if n := strings.Count(string(mustRead(t, path)), cmd); n != len(Events) {
-		t.Errorf("Hook %d-mal eingetragen, erwartet %d", n, len(Events))
+		t.Errorf("hook added %d times, expected %d", n, len(Events))
 	}
 
-	// Pfadwechsel ersetzt den alten Eintrag statt ihn zu duplizieren.
+	// A path change replaces the old entry instead of duplicating it.
 	cmd2 := Command("/new/place/knowledge-base-mcp")
 	if _, err := Install(path, cmd2); err != nil {
 		t.Fatal(err)
 	}
 	s = string(mustRead(t, path))
 	if strings.Contains(s, "/opt/knowledge-base") || strings.Count(s, cmd2) != len(Events) {
-		t.Errorf("Pfadwechsel fehlerhaft:\n%s", s)
+		t.Errorf("path change is wrong:\n%s", s)
 	}
 
 	if changed, err := Uninstall(path); err != nil || !changed {
 		t.Fatalf("uninstall: changed=%v err=%v", changed, err)
 	}
 	if norm(t, mustRead(t, path)) != norm(t, []byte(sample)) {
-		t.Errorf("nach Uninstall nicht identisch zum Original:\n%s", mustRead(t, path))
+		t.Errorf("not identical to the original after Uninstall:\n%s", mustRead(t, path))
 	}
 }
 
@@ -85,10 +85,10 @@ func TestInstallRemovesLegacySessionStartHook(t *testing.T) {
 	}
 	s := string(mustRead(t, path))
 	if strings.Contains(s, "/old/knowledge-base-mcp") || !strings.Contains(s, "/other/tool") {
-		t.Errorf("SessionStart-Migration fehlerhaft:\n%s", s)
+		t.Errorf("SessionStart migration is wrong:\n%s", s)
 	}
 	if strings.Count(s, "/new/knowledge-base-mcp hook") != len(Events) {
-		t.Errorf("neuer Hook nicht genau je Event einmal eingetragen:\n%s", s)
+		t.Errorf("new hook not added exactly once per event:\n%s", s)
 	}
 }
 
@@ -103,10 +103,10 @@ func TestInstallRejectsInvalidJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	_ = os.WriteFile(path, []byte("{kaputt"), 0o600)
 	if _, err := Install(path, Command("/x/knowledge-base-mcp")); err == nil {
-		t.Fatal("Fehler erwartet")
+		t.Fatal("error expected")
 	}
 	if string(mustRead(t, path)) != "{kaputt" {
-		t.Error("kaputte Datei darf nicht veraendert werden")
+		t.Error("a broken file must not be modified")
 	}
 }
 
@@ -115,12 +115,12 @@ func TestIsOurs(t *testing.T) {
 	no := []string{"rtk hook claude", "/a/knowledge-base-mcp", "/x/cc-status"}
 	for _, c := range yes {
 		if !IsOurs(c) {
-			t.Errorf("sollte erkannt werden: %q", c)
+			t.Errorf("should be recognized: %q", c)
 		}
 	}
 	for _, c := range no {
 		if IsOurs(c) {
-			t.Errorf("faelschlich erkannt: %q", c)
+			t.Errorf("wrongly recognized: %q", c)
 		}
 	}
 }

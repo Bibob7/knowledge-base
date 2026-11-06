@@ -21,27 +21,27 @@ import (
 	"github.com/kevin/knowledge-base/internal/store"
 )
 
-// runSubcommand fuehrt Hilfs-Befehle aus. handled=false: normal als MCP-Server starten.
+// runSubcommand runs helper commands. handled=false: start normally as an MCP server.
 func runSubcommand(args []string) (handled bool, code int) {
 	if len(args) == 0 {
 		return false, 0
 	}
 	switch args[0] {
 	case "hook":
-		// Ein Hook darf die Sitzung nie stoeren: immer Exit-Code 0.
+		// A hook must never disturb the session: always exit code 0.
 		if err := runHook(); err != nil && os.Getenv("KB_HOOK_DEBUG") != "" {
-			fmt.Fprintln(os.Stderr, "kb-hook: fehler:", err)
+			fmt.Fprintln(os.Stderr, "kb-hook: error:", err)
 		}
 		return true, 0
 	case "extract":
 		if err := runExtract(args[1:]); err != nil {
-			fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), "extract fehler:", err)
+			fmt.Fprintln(os.Stderr, time.Now().Format(time.RFC3339), "extract error:", err)
 			return true, 1
 		}
 		return true, 0
 	case "install-hooks", "uninstall-hooks":
 		if err := manageHooks(args[0] == "install-hooks"); err != nil {
-			fmt.Fprintln(os.Stderr, "fehler:", err)
+			fmt.Fprintln(os.Stderr, "error:", err)
 			return true, 1
 		}
 		return true, 0
@@ -50,7 +50,7 @@ func runSubcommand(args []string) (handled bool, code int) {
 }
 
 func runHook() error {
-	// Der Hintergrundlauf von 'claude -p' darf keine Hooks von uns ausloesen.
+	// The background run of 'claude -p' must not trigger any hooks of ours.
 	if os.Getenv(extract.GuardEnv) != "" {
 		return nil
 	}
@@ -124,16 +124,16 @@ func manageHooks(install bool) error {
 	}
 	switch {
 	case !changed:
-		fmt.Printf("%s: keine Aenderung noetig\n", path)
+		fmt.Printf("%s: no change needed\n", path)
 	case install:
-		fmt.Printf("Hooks (%v) in %s eingetragen (Backup: %s.kb-backup)\n", hook.Events, path, path)
+		fmt.Printf("Hooks (%v) added to %s (backup: %s.kb-backup)\n", hook.Events, path, path)
 	default:
-		fmt.Printf("Hooks aus %s entfernt (Backup: %s.kb-backup)\n", path, path)
+		fmt.Printf("Hooks removed from %s (backup: %s.kb-backup)\n", path, path)
 	}
 	return nil
 }
 
-// onSessionEnd startet die Auswertung im Hintergrund und kehrt sofort zurueck.
+// onSessionEnd starts the extraction in the background and returns immediately.
 func onSessionEnd(transcript, session, cwd string) error {
 	switch strings.ToLower(os.Getenv("KB_AUTO_LEARN")) {
 	case "0", "off", "false", "no":
@@ -149,20 +149,20 @@ func onSessionEnd(transcript, session, cwd string) error {
 	return extract.Spawn(exe, transcript, session, cwd)
 }
 
-// runExtract wertet ein Transkript aus (vom Hook gestartet oder manuell: --dry-run).
+// runExtract evaluates a transcript (started by the hook or manually: --dry-run).
 func runExtract(args []string) error {
 	fs := flag.NewFlagSet("extract", flag.ContinueOnError)
-	transcript := fs.String("transcript", "", "Pfad zum Transkript (JSONL)")
+	transcript := fs.String("transcript", "", "path to the transcript (JSONL)")
 	session := fs.String("session", "", "Session-ID")
-	cwd := fs.String("cwd", "", "Arbeitsverzeichnis der Sitzung (bestimmt das Projekt)")
-	project := fs.String("project", "", "Projektname statt Ermittlung aus --cwd")
-	dry := fs.Bool("dry-run", os.Getenv("KB_EXTRACT_DRY_RUN") != "", "nur anzeigen, nichts speichern")
-	delay := fs.Duration("delay", 0, "Wartezeit vor dem Start (Transkript soll fertig geschrieben sein)")
+	cwd := fs.String("cwd", "", "working directory of the session (determines the project)")
+	project := fs.String("project", "", "project name instead of deriving it from --cwd")
+	dry := fs.Bool("dry-run", os.Getenv("KB_EXTRACT_DRY_RUN") != "", "only show, do not store")
+	delay := fs.Duration("delay", 0, "wait before starting (the transcript should be fully written)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *transcript == "" || *session == "" {
-		return fmt.Errorf("--transcript und --session sind Pflicht")
+		return fmt.Errorf("--transcript and --session are required")
 	}
 	time.Sleep(*delay)
 

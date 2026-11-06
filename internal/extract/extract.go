@@ -16,18 +16,18 @@ import (
 )
 
 const (
-	minUserMsgs   = 3      // kuerzere Sitzungen lohnen die Auswertung nicht
-	minTextRunes  = 800    // ebenso sehr kurze Protokolle
-	maxTextRunes  = 100000 // Obergrenze fuer das Protokoll im Modell-Aufruf
+	minUserMsgs   = 3      // shorter sessions are not worth evaluating
+	minTextRunes  = 800    // likewise very short logs
+	maxTextRunes  = 100000 // upper limit for the log in the model call
 	maxFacts      = 8
 	minFactRunes  = 15
 	maxFactRunes  = 1200
-	dupThreshold  = 0.92 // ab hier gilt ein Fakt als bereits bekannt
-	conflictFloor = 0.78 // ab hier wird ein Modell-Urteil (add/skip/supersede) eingeholt
+	dupThreshold  = 0.92 // from here on a fact counts as already known
+	conflictFloor = 0.78 // from here on a model verdict (add/skip/supersede) is requested
 	AutoTag       = "auto"
 )
 
-// Fact ist ein vom Modell vorgeschlagener Wissenseintrag.
+// Fact is a knowledge entry proposed by the model.
 type Fact struct {
 	Content string   `json:"content"`
 	Scope   string   `json:"scope"`
@@ -37,7 +37,7 @@ type Fact struct {
 type Options struct {
 	Transcript string
 	SessionID  string
-	Project    string // leer = projektuebergreifend
+	Project    string // empty = cross-project
 	DryRun     bool
 }
 
@@ -50,7 +50,7 @@ type Deps struct {
 	Logf      func(format string, a ...any)
 }
 
-// Run wertet ein Transkript aus und speichert neues Wissen.
+// Run evaluates a transcript and stores new knowledge.
 func Run(ctx context.Context, d Deps, o Options) error {
 	from := d.loadProgress(o.SessionID)
 	f, err := os.Open(o.Transcript)
@@ -62,9 +62,9 @@ func Run(ctx context.Context, d Deps, o Options) error {
 	if err != nil {
 		return err
 	}
-	d.Logf("session=%s project=%q neue Zeilen %d..%d, %d Nutzer-Nachrichten", o.SessionID, o.Project, from+1, conv.LastLine, conv.UserMsgs)
+	d.Logf("session=%s project=%q new lines %d..%d, %d user messages", o.SessionID, o.Project, from+1, conv.LastLine, conv.UserMsgs)
 	if conv.UserMsgs < minUserMsgs || utf8.RuneCountInString(conv.Text) < minTextRunes {
-		d.Logf("uebersprungen: Sitzung zu kurz")
+		d.Logf("skipped: session too short")
 		if !o.DryRun {
 			d.saveProgress(o.SessionID, conv.LastLine)
 		}
@@ -73,13 +73,13 @@ func Run(ctx context.Context, d Deps, o Options) error {
 
 	raw, err := d.Runner.Run(ctx, extractSystem, "<transcript>\n"+Condense(conv.Text, maxTextRunes)+"\n</transcript>")
 	if err != nil {
-		return fmt.Errorf("extraktion: %w", err)
+		return fmt.Errorf("extraction: %w", err)
 	}
 	facts, err := ParseFacts(raw)
 	if err != nil {
-		return fmt.Errorf("extraktion: %w (Antwort: %.200s)", err, raw)
+		return fmt.Errorf("extraction: %w (response: %.200s)", err, raw)
 	}
-	d.Logf("%d Kandidaten vom Modell", len(facts))
+	d.Logf("%d candidates from the model", len(facts))
 
 	if err := d.process(ctx, o, facts); err != nil {
 		return err
@@ -94,7 +94,7 @@ type candidate struct {
 	fact    Fact
 	project string
 	vec     []float32
-	similar []store.SimilarEntry // Eintraege ab conflictFloor
+	similar []store.SimilarEntry // entries at or above conflictFloor
 }
 
 func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
@@ -102,7 +102,7 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 	for _, f := range facts {
 		f = sanitize(f)
 		if err := validate(f); err != nil {
-			d.Logf("verworfen (%v): %.80s", err, f.Content)
+			d.Logf("discarded (%v): %.80s", err, f.Content)
 			continue
 		}
 		project := o.Project
@@ -120,7 +120,7 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 		c := &candidate{fact: f, project: project, vec: vecs[0]}
 		switch classify(sims) {
 		case actionSkip:
-			d.Logf("bekannt (Aehnlichkeit %.2f zu #%d): %.80s", sims[0].Similarity, sims[0].ID, f.Content)
+			d.Logf("known (similarity %.2f to #%d): %.80s", sims[0].Similarity, sims[0].ID, f.Content)
 		case actionAdd:
 			ready = append(ready, c)
 		default:
@@ -137,17 +137,17 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 	if len(ambiguous) > 0 {
 		var err error
 		if decisions, err = d.judge(ctx, ambiguous); err != nil {
-			d.Logf("Urteil fehlgeschlagen, %d Faelle werden uebersprungen: %v", len(ambiguous), err)
+			d.Logf("verdict failed, skipping %d cases: %v", len(ambiguous), err)
 		}
 	}
 	for _, c := range ambiguous {
 		dec, ok := decisions[c]
 		if !ok || dec.action == "skip" {
-			d.Logf("bekannt/uebersprungen: %.80s", c.fact.Content)
+			d.Logf("known/skipped: %.80s", c.fact.Content)
 			continue
 		}
 		if dec.action == "supersede" {
-			c.fact.Tags = append(c.fact.Tags, "korrektur")
+			c.fact.Tags = append(c.fact.Tags, "correction")
 		}
 		d.save(ctx, o, c, dec.supersedes)
 	}
@@ -159,7 +159,7 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 
 func (d Deps) save(ctx context.Context, o Options, c *candidate, supersedes []int64) {
 	if o.DryRun {
-		d.Logf("[dry-run] wuerde speichern (project=%q, ersetzt %v): %s", c.project, supersedes, c.fact.Content)
+		d.Logf("[dry-run] would store (project=%q, supersedes %v): %s", c.project, supersedes, c.fact.Content)
 		return
 	}
 	res, err := d.Store.AddDocument(ctx, store.DocumentInput{
@@ -171,13 +171,13 @@ func (d Deps) save(ctx context.Context, o Options, c *candidate, supersedes []in
 		Chunks:     []store.ChunkInput{{Content: c.fact.Content, Embedding: c.vec}},
 	})
 	if err != nil {
-		d.Logf("speichern fehlgeschlagen: %v", err)
+		d.Logf("storing failed: %v", err)
 		return
 	}
-	d.Logf("gespeichert #%d (project=%q, ersetzt %v): %s", res.ID, c.project, res.Superseded, c.fact.Content)
+	d.Logf("stored #%d (project=%q, supersedes %v): %s", res.ID, c.project, res.Superseded, c.fact.Content)
 }
 
-// --- Entscheidungslogik ---
+// --- Decision logic ---
 
 type action int
 
@@ -187,7 +187,7 @@ const (
 	actionJudge
 )
 
-// classify entscheidet anhand der Aehnlichkeit zu bestehenden Eintraegen.
+// classify decides based on the similarity to existing entries.
 func classify(sims []store.SimilarEntry) action {
 	if len(sims) == 0 {
 		return actionAdd
@@ -236,7 +236,7 @@ func (d Deps) judge(ctx context.Context, cands []*candidate) (map[*candidate]dec
 		} `json:"decisions"`
 	}
 	if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
-		return nil, fmt.Errorf("urteil nicht lesbar: %w", err)
+		return nil, fmt.Errorf("verdict not readable: %w", err)
 	}
 	res := map[*candidate]decision{}
 	for _, dec := range out.Decisions {
@@ -250,7 +250,7 @@ func (d Deps) judge(ctx context.Context, cands []*candidate) (map[*candidate]dec
 		}
 		r := decision{action: dec.Action}
 		for _, id := range dec.Supersedes {
-			if allowed[id] { // nur IDs, die dem Modell tatsaechlich vorgelegt wurden
+			if allowed[id] { // only IDs that were actually presented to the model
 				r.supersedes = append(r.supersedes, id)
 			}
 		}
@@ -265,11 +265,11 @@ func (d Deps) judge(ctx context.Context, cands []*candidate) (map[*candidate]dec
 	return res, nil
 }
 
-// --- Parsen und Bereinigen ---
+// --- Parsing and sanitizing ---
 
 var fenceRe = regexp.MustCompile("(?s)^```[a-zA-Z]*\\s*|\\s*```$")
 
-// extractJSON schneidet das erste JSON-Objekt aus einer Modell-Antwort (auch mit Code-Fence).
+// extractJSON cuts the first JSON object out of a model response (also with a code fence).
 func extractJSON(s string) string {
 	s = strings.TrimSpace(fenceRe.ReplaceAllString(strings.TrimSpace(s), ""))
 	if i, j := strings.Index(s, "{"), strings.LastIndex(s, "}"); i >= 0 && j > i {
@@ -278,13 +278,13 @@ func extractJSON(s string) string {
 	return s
 }
 
-// ParseFacts liest die Antwort des Extraktions-Modells.
+// ParseFacts reads the response of the extraction model.
 func ParseFacts(raw string) ([]Fact, error) {
 	var out struct {
 		Facts []Fact `json:"facts"`
 	}
 	if err := json.Unmarshal([]byte(extractJSON(raw)), &out); err != nil {
-		return nil, fmt.Errorf("antwort ist kein gueltiges JSON: %w", err)
+		return nil, fmt.Errorf("response is not valid JSON: %w", err)
 	}
 	if len(out.Facts) > maxFacts {
 		out.Facts = out.Facts[:maxFacts]
@@ -318,9 +318,9 @@ func validate(f Fact) error {
 	n := utf8.RuneCountInString(f.Content)
 	switch {
 	case n < minFactRunes:
-		return fmt.Errorf("zu kurz")
+		return fmt.Errorf("too short")
 	case n > maxFactRunes:
-		return fmt.Errorf("zu lang")
+		return fmt.Errorf("too long")
 	}
 	return secrets.Check(f.Content)
 }
@@ -333,7 +333,7 @@ func deriveTitle(content string) string {
 	return first
 }
 
-// --- Fortschritt je Session (inkrementelles Auswerten bei Wiederaufnahme) ---
+// --- Progress per session (incremental evaluation when a session is resumed) ---
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 

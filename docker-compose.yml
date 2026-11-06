@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kb}
       POSTGRES_DB: ${POSTGRES_DB:-knowledge_base}
     ports:
-      # Nur lokal erreichbar. 5433, damit es nicht mit einem lokalen Postgres kollidiert.
+      # Reachable locally only. 5433 so it does not clash with a local Postgres.
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - kb-pgdata:/var/lib/postgresql/data

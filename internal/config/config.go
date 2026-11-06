@@ -1,4 +1,4 @@
-// Package config liest die Konfiguration aus Umgebungsvariablen.
+// Package config reads the configuration from environment variables.
 package config
 
 import (
@@ -24,9 +24,9 @@ type Config struct {
 	ChunkOverlap int
 }
 
-// LoadDotEnv liest eine .env-Datei und setzt nur Variablen, die noch nicht in der
-// Umgebung gesetzt sind. Pfad: $KB_ENV_FILE, sonst <Verzeichnis des Binaries>/../.env.
-// Eine fehlende Datei ist kein Fehler.
+// LoadDotEnv reads a .env file and only sets variables that are not already set in
+// the environment. Path: $KB_ENV_FILE, otherwise <binary directory>/../.env.
+// A missing file is not an error.
 func LoadDotEnv() error {
 	path := os.Getenv("KB_ENV_FILE")
 	if path == "" {
@@ -87,15 +87,15 @@ func Load() (Config, error) {
 		return c, err
 	}
 	if c.EmbeddingDim <= 0 || c.ChunkSize <= 0 || c.ChunkOverlap < 0 || c.ChunkOverlap >= c.ChunkSize {
-		return c, fmt.Errorf("ungueltige Werte: EMBEDDING_DIM=%d CHUNK_SIZE=%d CHUNK_OVERLAP=%d",
+		return c, fmt.Errorf("invalid values: EMBEDDING_DIM=%d CHUNK_SIZE=%d CHUNK_OVERLAP=%d",
 			c.EmbeddingDim, c.ChunkSize, c.ChunkOverlap)
 	}
 	return c, nil
 }
 
-// prefixEnv liest ein Embedding-Praefix. Nicht gesetzt: nomic-embed-text erwartet
-// "search_document: " bzw. "search_query: " (bessere Treffer), andere Modelle keins.
-// Explizit leer gesetzt heisst: kein Praefix.
+// prefixEnv reads an embedding prefix. If unset, nomic-embed-text expects
+// "search_document: " / "search_query: " (better matches), other models none.
+// Explicitly set to empty means: no prefix.
 func prefixEnv(key, nomicDefault string) string {
 	if v, ok := os.LookupEnv(key); ok {
 		return v

@@ -1,11 +1,11 @@
-// Package chunk teilt Text absatzbasiert in ueberlappende Stuecke.
+// Package chunk splits text into overlapping pieces along paragraph boundaries.
 package chunk
 
 import "strings"
 
-// Split teilt text in Chunks von etwa size Zeichen (Runes, plus Ueberlappung). Es wird an
-// Absatzgrenzen getrennt; zu lange Absaetze werden hart geteilt. Zwischen
-// aufeinanderfolgenden Chunks liegt eine Ueberlappung von etwa overlap Zeichen.
+// Split splits text into chunks of about size characters (runes, plus overlap). It
+// splits at paragraph boundaries; paragraphs that are too long are split hard.
+// Consecutive chunks overlap by about overlap characters.
 func Split(text string, size, overlap int) []string {
 	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
 	if text == "" {
@@ -28,7 +28,7 @@ func Split(text string, size, overlap int) []string {
 
 	var chunks []string
 	var cur []rune
-	hasNew := false // cur enthaelt mehr als nur Ueberlappung
+	hasNew := false // cur contains more than just overlap
 	flush := func() {
 		if !hasNew {
 			return
