@@ -119,7 +119,7 @@ func run() error {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete_document",
-		Description: "Permanently deletes an entry including its chunks. For corrections use supersede instead; delete only junk or on request.",
+		Description: "Permanently deletes an entry including its chunks. Entries it had superseded become current again (or point to its own successor). For corrections use supersede instead; delete only junk or on request.",
 	}, a.deleteDocument)
 
 	log.Printf("ready (model=%s, dim=%d)", cfg.EmbeddingModel, cfg.EmbeddingDim)

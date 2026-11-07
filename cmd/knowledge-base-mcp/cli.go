@@ -104,8 +104,10 @@ func runHook() error {
 			return onSessionEnd(peek.TranscriptPath, peek.SessionID, peek.Cwd)
 		case "SessionStart":
 			// Silent: nothing is injected into the context. A background sweep evaluates
-			// sessions that never ended cleanly. 'compact' happens mid-session, skip it.
+			// sessions that never ended cleanly. 'compact' happens mid-session: no sweep,
+			// but the injected entries were summarised away, so they may be shown again.
 			if peek.Source == "compact" {
+				hook.ForgetShown(peek.SessionID)
 				return nil
 			}
 			return onSessionStart(peek.SessionID)
@@ -118,7 +120,7 @@ func runHook() error {
 	if err != nil {
 		return err
 	}
-	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim, cfg.EmbeddingModel)
 	if err != nil {
 		return err
 	}
@@ -219,7 +221,10 @@ func runExtract(args []string) error {
 	if proj == "" {
 		proj = hook.ProjectFromDir(ctx, *cwd)
 	}
-	return d.Run(ctx, extract.Options{Transcript: *transcript, SessionID: *session, Project: proj, DryRun: *dry})
+	return d.Run(ctx, extract.Options{Transcript: *transcript, SessionID: *session, Project: proj, DryRun: *dry,
+		// A sweep may be evaluating this session right now; wait for it, then evaluate
+		// what was added since.
+		WaitForLock: 5 * time.Minute})
 }
 
 // newExtractDeps wires the store, embedding client and model runner for evaluating transcripts.
@@ -231,7 +236,7 @@ func newExtractDeps(ctx context.Context) (extract.Deps, func(), error) {
 	if err != nil {
 		return extract.Deps{}, nil, err
 	}
-	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim, cfg.EmbeddingModel)
 	if err != nil {
 		return extract.Deps{}, nil, err
 	}
@@ -300,7 +305,7 @@ func runReindex(args []string) error {
 	if err != nil {
 		return err
 	}
-	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim, "")
 	if err != nil {
 		return err
 	}
@@ -412,7 +417,7 @@ func runViz(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim)
+	st, err := store.OpenReadOnly(ctx, cfg.DatabaseURL, cfg.EmbeddingDim, "")
 	if err != nil {
 		return err
 	}

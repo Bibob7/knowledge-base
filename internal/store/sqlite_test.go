@@ -29,7 +29,7 @@ func TestSQLite(t *testing.T) {
 func TestSQLiteReadOnlyNeedsExistingDatabase(t *testing.T) {
 	ctx := context.Background()
 	url := "sqlite://" + filepath.Join(t.TempDir(), "knowledge.db")
-	if _, err := OpenReadOnly(ctx, url, testDim); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := OpenReadOnly(ctx, url, testDim, "m"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("OpenReadOnly on a missing file: %v", err)
 	}
 	s, err := Open(ctx, url, testDim, "m")
@@ -37,7 +37,7 @@ func TestSQLiteReadOnlyNeedsExistingDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	ro, err := OpenReadOnly(ctx, url, testDim)
+	ro, err := OpenReadOnly(ctx, url, testDim, "m")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func BenchmarkSQLiteHookSearch(b *testing.B) {
 	q := vec()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ro, err := OpenReadOnly(ctx, url, dim)
+		ro, err := OpenReadOnly(ctx, url, dim, "m")
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -195,5 +195,48 @@ func BenchmarkSQLiteHookSearch(b *testing.B) {
 			b.Fatal(err)
 		}
 		ro.Close()
+	}
+}
+
+// A process that opened the database before a reindex (an MCP server of an older session,
+// the background extraction) must not write vectors of its model into it afterwards.
+func TestSQLiteRefusesWritesAfterModelChange(t *testing.T) {
+	ctx := context.Background()
+	url := "sqlite://" + filepath.Join(t.TempDir(), "knowledge.db")
+	s, err := Open(ctx, url, testDim, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	doc := DocumentInput{Title: "x", Chunks: []ChunkInput{{Content: "x", Embedding: unitVec(0)}}}
+	for model, ok := range map[string]bool{"m": true, "m:latest": true, "": true, "other": false} {
+		ro, err := OpenReadOnly(ctx, url, testDim, model)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = ro.AddDocument(ctx, doc)
+		ro.Close()
+		if ok != (err == nil) || (!ok && !strings.Contains(err.Error(), "nothing was stored")) {
+			t.Errorf("write with model %q: %v", model, err)
+		}
+	}
+	// The long-running server notices a reindex done by another process.
+	other, err := OpenReadOnly(ctx, url, testDim, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if err := other.Reindex(ctx, ReindexOptions{Model: "new", Dim: testDim, Batch: 10,
+		Embed: func(_ context.Context, texts []string) ([][]float32, error) {
+			out := make([][]float32, len(texts))
+			for i := range out {
+				out[i] = unitVec(1)
+			}
+			return out, nil
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddDocument(ctx, doc); err == nil {
+		t.Error("the server opened with the old model must refuse to write after the reindex")
 	}
 }

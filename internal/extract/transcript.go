@@ -54,6 +54,16 @@ type block struct {
 // (0-based). Only text messages from the user and Claude as well as remember
 // calls are considered; tool results, thinking blocks and subagents are left out.
 func ParseTranscript(r io.Reader, fromLine int) (Conversation, error) {
+	return parseTranscript(r, fromLine, -1)
+}
+
+// ParseTranscriptUntil is like ParseTranscript but only looks at lines fromLine+1 to
+// untilLine (the earlier part of a session, used as context).
+func ParseTranscriptUntil(r io.Reader, fromLine, untilLine int) (Conversation, error) {
+	return parseTranscript(r, fromLine, untilLine)
+}
+
+func parseTranscript(r io.Reader, fromLine, untilLine int) (Conversation, error) {
 	var conv Conversation
 	var b strings.Builder
 	br := bufio.NewReaderSize(r, 1<<20)
@@ -70,6 +80,10 @@ func ParseTranscript(r io.Reader, fromLine int) (Conversation, error) {
 		raw, err := br.ReadBytes('\n')
 		if len(raw) > 0 {
 			line++
+			if untilLine >= 0 && line > untilLine {
+				line--
+				break
+			}
 			if line > fromLine {
 				handleLine(raw, &conv, add)
 			}
