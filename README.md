@@ -127,7 +127,7 @@ source (if Go is installed), so tag right after merging the version bump.
 | `list_documents` | List entries, e.g. "what was learned recently" (`include_superseded` also shows outdated ones) |
 | `get_document` | Read an entry by ID |
 | `add_document` | Store a longer document. The same `source` replaces the old one. |
-| `delete_document` | Delete permanently (use `supersede` for corrections) |
+| `delete_document` | Delete permanently (use `supersede` for corrections); entries it had superseded become current again |
 
 Entries have an optional `project` (empty = cross-project), a `kind` (`fact`/`document`)
 and a `status` (`active`/`superseded`). Texts containing obvious secrets (keys, tokens, passwords)
@@ -164,8 +164,11 @@ In addition to the immediate `remember` during the session, a `SessionEnd` hook 
 1. The hook starts a detached background process (`"$KB" extract`) and returns immediately,
    so ending the session is not delayed.
 2. The process reads only your messages and Claude's text (no tool output, no subagents, no system
-   messages). Sessions with fewer than 3 user messages are skipped, very long ones are cut to 100,000
-   characters, and resumed sessions are evaluated only from the last evaluated line onwards.
+   messages). Very long sessions are cut to 100,000 characters. A session with fewer than 3 user
+   messages is not evaluated yet but kept pending, so it is evaluated together with what a resume adds.
+   A resumed session is evaluated from the last evaluated line onwards, with the end of the earlier part as
+   context, so even a single correction after a resume is picked up. If storing a fact fails, nothing is
+   marked as evaluated and the next run (resume or sweep) tries again.
 3. A lean `claude -p` run (model `sonnet`, without tools, MCP, hooks and settings) extracts corrections,
    preferences/decisions and verified facts that cannot be read from the code. The prompt is deliberately
    strict: better 0-2 strong facts than many weak ones.
