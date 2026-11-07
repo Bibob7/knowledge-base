@@ -21,14 +21,19 @@ const (
 	minTextRunes = 800    // likewise very short logs
 	maxTextRunes = 100000 // upper limit for the log in the model call
 	maxFacts     = 8
-	minFactRunes = 15
-	maxFactRunes = 1200
+	// maxContextRunes is how much of the already evaluated part of a session is shown as
+	// context when only its continuation is evaluated.
+	maxContextRunes = 6000
+	minFactRunes    = 15
+	maxFactRunes    = 1200
 	// Only near-verbatim copies count as known without asking the model. Contradictions and
 	// paraphrases are indistinguishable by similarity (both 0.89-0.96 for bge-m3 and nomic),
 	// so everything between the model's "similar" threshold and this value gets a verdict.
 	dupThreshold = 0.98
 	AutoTag      = "auto"
 )
+
+var lockPoll = 5 * time.Second
 
 // Fact is a knowledge entry proposed by the model.
 type Fact struct {
@@ -42,6 +47,9 @@ type Options struct {
 	SessionID  string
 	Project    string // empty = cross-project
 	DryRun     bool
+	// WaitForLock is how long to wait if the session is being evaluated by another process
+	// (0: give up at once, as the sweep does).
+	WaitForLock time.Duration
 }
 
 type Deps struct {
@@ -59,17 +67,23 @@ type Deps struct {
 func Run(ctx context.Context, d Deps, o Options) error { return d.Run(ctx, o) }
 
 // Run evaluates a transcript and stores new knowledge.
+//
+// Progress is kept per session: "lines" is how far the transcript was read, "evaluated"
+// how far it was actually given to the model. A part that is too short to be worth a
+// model call is left pending and evaluated together with what the session adds later;
+// the part after an evaluated one is always evaluated (with the end of the earlier part
+// as context), so a short correction after a resume is not lost.
 func (d Deps) Run(ctx context.Context, o Options) error {
 	// One evaluation per session at a time (SessionEnd and sweep must not overlap).
 	if d.StateDir != "" && safeID.MatchString(o.SessionID) {
-		release, ok := acquireLock(d.StateDir, o.SessionID, sweepLockStale, time.Now())
+		release, ok := d.waitForLock(ctx, o.SessionID, o.WaitForLock)
 		if !ok {
 			d.Logf("session %s is already being evaluated", o.SessionID)
 			return nil
 		}
 		defer release()
 	}
-	from := d.loadProgress(o.SessionID)
+	from := d.loadProgress(o.SessionID).Evaluated
 	f, err := os.Open(o.Transcript)
 	if err != nil {
 		return err
@@ -80,15 +94,25 @@ func (d Deps) Run(ctx context.Context, o Options) error {
 		return err
 	}
 	d.Logf("session=%s project=%q new lines %d..%d, %d user messages", o.SessionID, o.Project, from+1, conv.LastLine, conv.UserMsgs)
-	if conv.UserMsgs < minUserMsgs || utf8.RuneCountInString(conv.Text) < minTextRunes {
-		d.Logf("skipped: session too short")
+	tooShort := conv.UserMsgs < minUserMsgs || utf8.RuneCountInString(conv.Text) < minTextRunes
+	if from > 0 {
+		tooShort = conv.UserMsgs == 0 // a continuation: the earlier part gives the context
+	}
+	if tooShort {
+		d.Logf("skipped for now: too short (evaluated together with what the session adds later)")
 		if !o.DryRun {
-			d.saveProgress(o.SessionID, conv.LastLine)
+			d.saveProgress(o.SessionID, progress{Lines: conv.LastLine, Evaluated: from})
 		}
 		return nil
 	}
 
-	raw, err := d.Runner.Run(ctx, extractSystem, "<transcript>\n"+Condense(conv.Text, maxTextRunes)+"\n</transcript>")
+	input := "<transcript>\n" + Condense(conv.Text, maxTextRunes) + "\n</transcript>"
+	if from > 0 {
+		if earlier := d.earlierContext(o.Transcript, from); earlier != "" {
+			input = "<earlier_context>\n" + earlier + "\n</earlier_context>\n" + input
+		}
+	}
+	raw, err := d.Runner.Run(ctx, extractSystem, input)
 	if err != nil {
 		return fmt.Errorf("extraction: %w", err)
 	}
@@ -98,13 +122,53 @@ func (d Deps) Run(ctx context.Context, o Options) error {
 	}
 	d.Logf("%d candidates from the model", len(facts))
 
+	// On an error nothing is marked as evaluated: the next run (SessionEnd of a resumed
+	// session or the sweep) evaluates the part again; facts stored before the error are
+	// then recognised as known.
 	if err := d.process(ctx, o, facts); err != nil {
 		return err
 	}
 	if !o.DryRun {
-		d.saveProgress(o.SessionID, conv.LastLine)
+		d.saveProgress(o.SessionID, progress{Lines: conv.LastLine, Evaluated: conv.LastLine})
 	}
 	return nil
+}
+
+// earlierContext returns the end of the already evaluated part of a session.
+func (d Deps) earlierContext(transcript string, until int) string {
+	f, err := os.Open(transcript)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	c, err := ParseTranscriptUntil(f, 0, until)
+	if err != nil {
+		return ""
+	}
+	r := []rune(c.Text)
+	if len(r) > maxContextRunes {
+		r = append([]rune("[...] "), r[len(r)-maxContextRunes:]...)
+	}
+	return string(r)
+}
+
+// waitForLock takes the evaluation lock of a session, waiting up to wait for another
+// evaluation (e.g. a sweep that started just before the session ended) to finish.
+func (d Deps) waitForLock(ctx context.Context, session string, wait time.Duration) (func(), bool) {
+	deadline := time.Now().Add(wait)
+	for {
+		if release, ok := acquireLock(d.StateDir, session, sweepLockStale, time.Now()); ok {
+			return release, true
+		}
+		if wait <= 0 || time.Now().After(deadline) {
+			return nil, false
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(lockPoll):
+		}
+	}
 }
 
 type candidate struct {
@@ -150,6 +214,13 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 		}
 	}
 
+	var failed int
+	save := func(c *candidate, supersedes []int64) {
+		if err := d.save(ctx, o, c, supersedes); err != nil {
+			d.Logf("storing failed: %v", err)
+			failed++
+		}
+	}
 	decisions := map[*candidate]decision{}
 	if len(ambiguous) > 0 {
 		var err error
@@ -166,18 +237,21 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 		if dec.action == "supersede" {
 			c.fact.Tags = append(c.fact.Tags, "correction")
 		}
-		d.save(ctx, o, c, dec.supersedes)
+		save(c, dec.supersedes)
 	}
 	for _, c := range ready {
-		d.save(ctx, o, c, nil)
+		save(c, nil)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d fact(s) could not be stored, the session will be evaluated again", failed)
 	}
 	return nil
 }
 
-func (d Deps) save(ctx context.Context, o Options, c *candidate, supersedes []int64) {
+func (d Deps) save(ctx context.Context, o Options, c *candidate, supersedes []int64) error {
 	if o.DryRun {
 		d.Logf("[dry-run] would store (project=%q, supersedes %v): %s", c.project, supersedes, c.fact.Content)
-		return
+		return nil
 	}
 	res, err := d.Store.AddDocument(ctx, store.DocumentInput{
 		Title:      deriveTitle(c.fact.Content),
@@ -188,10 +262,10 @@ func (d Deps) save(ctx context.Context, o Options, c *candidate, supersedes []in
 		Chunks:     []store.ChunkInput{{Content: c.fact.Content, Embedding: c.vec}},
 	})
 	if err != nil {
-		d.Logf("storing failed: %v", err)
-		return
+		return err
 	}
 	d.Logf("stored #%d (project=%q, supersedes %v): %s", res.ID, c.project, res.Superseded, c.fact.Content)
+	return nil
 }
 
 // --- Decision logic ---
@@ -361,23 +435,37 @@ func (d Deps) progressPath(session string) string {
 	return filepath.Join(d.StateDir, session+".json")
 }
 
-func (d Deps) loadProgress(session string) int {
+// progress of a session: Lines read, Evaluated given to the model (see Run).
+type progress struct {
+	Lines     int `json:"lines"`
+	Evaluated int `json:"evaluated"`
+}
+
+func (d Deps) loadProgress(session string) progress {
+	var st progress
 	p := d.progressPath(session)
 	if p == "" {
-		return 0
+		return st
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return 0
+		return st
 	}
-	var st struct {
-		Lines int `json:"lines"`
+	var raw struct {
+		Lines     int  `json:"lines"`
+		Evaluated *int `json:"evaluated"`
 	}
-	_ = json.Unmarshal(b, &st)
-	return st.Lines
+	if json.Unmarshal(b, &raw) != nil {
+		return st
+	}
+	st.Lines, st.Evaluated = raw.Lines, raw.Lines // files of older versions: all read lines were evaluated
+	if raw.Evaluated != nil {
+		st.Evaluated = *raw.Evaluated
+	}
+	return st
 }
 
-func (d Deps) saveProgress(session string, lines int) {
+func (d Deps) saveProgress(session string, st progress) {
 	p := d.progressPath(session)
 	if p == "" {
 		return
@@ -385,6 +473,6 @@ func (d Deps) saveProgress(session string, lines int) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return
 	}
-	b, _ := json.Marshal(map[string]int{"lines": lines})
+	b, _ := json.Marshal(st)
 	_ = os.WriteFile(p, b, 0o600)
 }
