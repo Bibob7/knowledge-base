@@ -62,15 +62,39 @@ func Open(ctx context.Context, url string, dim int, model string) (Store, error)
 
 // OpenReadOnly connects without migrating or checking the schema (fast, for hooks and
 // other short-lived commands; the MCP server has opened the database with Open before).
-func OpenReadOnly(ctx context.Context, url string, dim int) (Store, error) {
+// Despite the name such a store can write: if model is not empty, every AddDocument
+// first checks inside its transaction that the database is still embedded with that
+// model and dimension (it may have been reindexed meanwhile), otherwise writes are not
+// checked.
+func OpenReadOnly(ctx context.Context, url string, dim int, model string) (Store, error) {
+	var (
+		s   Store
+		err error
+	)
 	switch {
 	case isPostgresURL(url):
-		return openPostgresReadOnly(ctx, url, dim)
+		var pg *pgStore
+		if pg, err = openPostgresReadOnly(ctx, url, dim); err == nil {
+			pg.model = normalizeModel(model)
+			s = pg
+		}
 	case isSQLiteURL(url):
-		return openSQLiteReadOnly(ctx, url, dim)
+		var lite *sqliteStore
+		if lite, err = openSQLiteReadOnly(ctx, url, dim); err == nil {
+			lite.model = normalizeModel(model)
+			s = lite
+		}
 	default:
-		return nil, unsupportedURL(url)
+		err = unsupportedURL(url)
 	}
+	return s, err
+}
+
+// errEmbeddingChanged is returned by a write when the database was re-embedded with a
+// different model or dimension after this store was opened.
+func errEmbeddingChanged(storedDim, storedModel string, dim int, model string) error {
+	return fmt.Errorf("the database is now embedded with model %q (dimension %s), but this process uses %q (dimension %d); "+
+		"nothing was stored (restart the MCP server via /mcp, or check EMBEDDING_MODEL)", storedModel, storedDim, model, dim)
 }
 
 func isPostgresURL(url string) bool {

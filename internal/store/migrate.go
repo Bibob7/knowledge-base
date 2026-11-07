@@ -51,7 +51,7 @@ type MigrateResult struct {
 // source's model and dimension; fallbackModel is used if the source does not record one.
 func Migrate(ctx context.Context, fromURL, toURL, fallbackModel string) (MigrateResult, error) {
 	var res MigrateResult
-	src, err := OpenReadOnly(ctx, fromURL, 0)
+	src, err := OpenReadOnly(ctx, fromURL, 0, "")
 	if err != nil {
 		return res, fmt.Errorf("source: %w", err)
 	}

@@ -113,7 +113,7 @@ func runContract(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := len(all) + 2; snap.Total != want { // + the two superseded entries kept from "basics"
+	if want := len(all) + 2; snap.Total != want { // + the two entries left from "basics"
 		t.Errorf("entries after reindex: %d, want %d", snap.Total, want)
 	}
 	if len(snap.Docs) != 5 || len(snap.Docs[0].Vec) != newDim {
@@ -264,8 +264,83 @@ func contractBasics(t *testing.T, s Store) {
 	if list, _ := s.ListDocuments(ctx, "", p, false, 50); len(list) != 1 {
 		t.Errorf("active entries after the basics: %d, want 1", len(list))
 	}
+	// Deleting the replacement (e.g. it was junk) makes what it had superseded current again.
 	if err := s.DeleteDocument(ctx, newer.ID); err != nil {
 		t.Fatal(err)
+	}
+	for _, id := range []int64{kanga.ID, umlaut.ID} {
+		if d, err := s.GetDocument(ctx, id); err != nil || d.Status != "active" || d.SupersededBy != nil {
+			t.Errorf("entry %d after deleting its replacement: %+v, err %v", id, d, err)
+		}
+	}
+	if hits, _ := s.Search(ctx, "kangaroo", unitVec(0), p, nil, 5); len(hits) == 0 || hits[0].DocumentID != kanga.ID {
+		t.Errorf("restored entry not found again: %+v", hits)
+	}
+
+	t.Run("history", func(t *testing.T) { contractHistory(t, s) })
+}
+
+// contractHistory checks that deleting or re-ingesting an entry never leaves the
+// entries it had superseded pointing to nothing.
+func contractHistory(t *testing.T, s Store) {
+	ctx := context.Background()
+	const p = "history"
+	add := func(in DocumentInput) AddResult {
+		t.Helper()
+		in.Project = p
+		if in.Kind == "" {
+			in.Kind = "fact"
+		}
+		res, err := s.AddDocument(ctx, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	chunk := func(text string, i int) []ChunkInput { return []ChunkInput{{Content: text, Embedding: unitVec(i)}} }
+	status := func(id int64) (string, int64) {
+		t.Helper()
+		d, err := s.GetDocument(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.SupersededBy == nil {
+			return d.Status, 0
+		}
+		return d.Status, *d.SupersededBy
+	}
+
+	// Chain a <- b <- c: deleting b links a to c; deleting c then makes a current again.
+	a := add(DocumentInput{Title: "a", Chunks: chunk("version a", 4)})
+	b := add(DocumentInput{Title: "b", Chunks: chunk("version b", 4), Supersedes: []int64{a.ID}})
+	c := add(DocumentInput{Title: "c", Chunks: chunk("version c", 4), Supersedes: []int64{b.ID}})
+	if err := s.DeleteDocument(ctx, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, by := status(a.ID); st != "superseded" || by != c.ID {
+		t.Errorf("a after deleting b: %s by %d, want superseded by %d", st, by, c.ID)
+	}
+	if err := s.DeleteDocument(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st, by := status(a.ID); st != "active" || by != 0 {
+		t.Errorf("a after deleting c: %s by %d, want active", st, by)
+	}
+
+	// Re-ingesting a document hands its history over to the new version.
+	v1 := add(DocumentInput{Title: "doc v1", Kind: "document", Source: "file:///h.md", Chunks: chunk("doc v1", 5),
+		Supersedes: []int64{a.ID}})
+	v2 := add(DocumentInput{Title: "doc v2", Kind: "document", Source: "file:///h.md", Chunks: chunk("doc v2", 5)})
+	if !v2.Replaced {
+		t.Fatal("re-ingest must replace v1")
+	}
+	if st, by := status(a.ID); st != "superseded" || by != v2.ID {
+		t.Errorf("a after re-ingest: %s by %d, want superseded by %d (v1 was %d)", st, by, v2.ID, v1.ID)
+	}
+	for _, id := range []int64{a.ID, v2.ID} {
+		if err := s.DeleteDocument(ctx, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

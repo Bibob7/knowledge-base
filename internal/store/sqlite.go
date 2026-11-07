@@ -238,7 +238,15 @@ func (s *sqliteStore) AddDocument(ctx context.Context, in DocumentInput) (AddRes
 		return res, err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := s.checkEmbedding(ctx, tx); err != nil {
+		return res, err
+	}
+	var predecessors []int64 // entries the replaced version had superseded
 	if in.Source != "" {
+		if predecessors, err = sqliteIDs(ctx, tx, `SELECT id FROM documents WHERE superseded_by IN
+			(SELECT id FROM documents WHERE source = ? AND status = 'active')`, in.Source); err != nil {
+			return res, err
+		}
 		r, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE source = ? AND status = 'active'`, in.Source)
 		if err != nil {
 			return res, err
@@ -252,6 +260,14 @@ func (s *sqliteStore) AddDocument(ctx context.Context, in DocumentInput) (AddRes
 		 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 		in.Title, nilIfEmpty(in.Source), nilIfEmpty(in.Project), in.Kind, tags, now, now).Scan(&res.ID); err != nil {
 		return res, err
+	}
+	if len(predecessors) > 0 {
+		// The new version takes over the history of the replaced one.
+		ids, _ := json.Marshal(predecessors)
+		if _, err := tx.ExecContext(ctx, `UPDATE documents SET superseded_by = ? WHERE id IN (SELECT value FROM json_each(?))`,
+			res.ID, string(ids)); err != nil {
+			return res, err
+		}
 	}
 	ins, err := tx.PrepareContext(ctx, `INSERT INTO chunks (document_id, idx, content, embedding) VALUES (?, ?, ?, ?)`)
 	if err != nil {
@@ -272,6 +288,58 @@ func (s *sqliteStore) AddDocument(ctx context.Context, in DocumentInput) (AddRes
 		}
 	}
 	return res, tx.Commit()
+}
+
+// checkEmbedding makes sure, inside the write transaction, that the database is still
+// embedded with the model and dimension of this process. Other processes (an MCP server
+// of an older session, the background extraction) may have opened it before a reindex.
+func (s *sqliteStore) checkEmbedding(ctx context.Context, tx *sql.Tx) error {
+	if s.model == "" {
+		return nil
+	}
+	var dim, model string
+	err := tx.QueryRowContext(ctx, `SELECT
+		COALESCE((SELECT value FROM kb_meta WHERE key = 'embedding_dim'), ''),
+		COALESCE((SELECT value FROM kb_meta WHERE key = 'embedding_model'), '')`).Scan(&dim, &model)
+	if err != nil {
+		return err
+	}
+	if dim != strconv.Itoa(s.dim) || normalizeModel(model) != s.model {
+		return errEmbeddingChanged(dim, model, s.dim, s.model)
+	}
+	return nil
+}
+
+// sqliteRelinkSuccessors runs before deleting entry id: entries that id had superseded
+// take over id's place in the history. If id was active they become active again (the
+// replacement was removed, so they are current knowledge again); if id itself had been
+// superseded they point to its successor. Without this, ON DELETE SET NULL would leave
+// them superseded by nothing, invisible to every search.
+func sqliteRelinkSuccessors(ctx context.Context, tx *sql.Tx, id int64) error {
+	_, err := tx.ExecContext(ctx, `
+UPDATE documents SET
+	superseded_by = (SELECT d.superseded_by FROM documents d WHERE d.id = ?1),
+	status = CASE WHEN (SELECT d.superseded_by FROM documents d WHERE d.id = ?1) IS NULL THEN 'active' ELSE 'superseded' END,
+	updated_at = ?2
+WHERE superseded_by = ?1`, id, nowText())
+	return err
+}
+
+func sqliteIDs(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func sqliteMarkSuperseded(ctx context.Context, tx *sql.Tx, oldIDs []int64, newID int64) ([]int64, error) {
@@ -673,14 +741,22 @@ func (s *sqliteStore) GetDocument(ctx context.Context, id int64) (*Document, err
 }
 
 func (s *sqliteStore) DeleteDocument(ctx context.Context, id int64) error {
-	r, err := s.db.ExecContext(ctx, `DELETE FROM documents WHERE id = ?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := sqliteRelinkSuccessors(ctx, tx, id); err != nil {
+		return err
+	}
+	r, err := tx.ExecContext(ctx, `DELETE FROM documents WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := r.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *sqliteStore) Snapshot(ctx context.Context, limit int) (*Snapshot, error) {

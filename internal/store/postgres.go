@@ -132,10 +132,22 @@ func (s *pgStore) AddDocument(ctx context.Context, in DocumentInput) (AddResult,
 		return res, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if err := s.checkEmbedding(ctx, tx); err != nil {
+		return res, err
+	}
 
 	var src, proj *string
+	var predecessors []int64 // entries the replaced version had superseded
 	if in.Source != "" {
 		src = &in.Source
+		rows, err := tx.Query(ctx, `SELECT id FROM documents WHERE superseded_by IN
+			(SELECT id FROM documents WHERE source = $1 AND status = 'active')`, in.Source)
+		if err != nil {
+			return res, err
+		}
+		if predecessors, err = pgx.CollectRows(rows, pgx.RowTo[int64]); err != nil {
+			return res, err
+		}
 		tag, err := tx.Exec(ctx, `DELETE FROM documents WHERE source = $1 AND status = 'active'`, in.Source)
 		if err != nil {
 			return res, err
@@ -149,6 +161,12 @@ func (s *pgStore) AddDocument(ctx context.Context, in DocumentInput) (AddResult,
 		`INSERT INTO documents (title, source, project, kind, tags) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		in.Title, src, proj, in.Kind, in.Tags).Scan(&res.ID); err != nil {
 		return res, err
+	}
+	if len(predecessors) > 0 {
+		// The new version takes over the history of the replaced one.
+		if _, err := tx.Exec(ctx, `UPDATE documents SET superseded_by = $1 WHERE id = ANY($2)`, res.ID, predecessors); err != nil {
+			return res, err
+		}
 	}
 	batch := &pgx.Batch{}
 	for i, c := range in.Chunks {
@@ -172,6 +190,26 @@ func (s *pgStore) AddDocument(ctx context.Context, in DocumentInput) (AddResult,
 		}
 	}
 	return res, tx.Commit(ctx)
+}
+
+// checkEmbedding makes sure, inside the write transaction, that the database is still
+// embedded with the model and dimension of this process (see the SQLite variant).
+func (s *pgStore) checkEmbedding(ctx context.Context, tx pgx.Tx) error {
+	if s.model == "" {
+		return nil
+	}
+	var typmod int
+	var model string
+	err := tx.QueryRow(ctx, `SELECT
+		(SELECT atttypmod FROM pg_attribute WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'),
+		COALESCE((SELECT value FROM kb_meta WHERE key = 'embedding_model'), '')`).Scan(&typmod, &model)
+	if err != nil {
+		return err
+	}
+	if typmod != s.dim || normalizeModel(model) != s.model {
+		return errEmbeddingChanged(strconv.Itoa(typmod), model, s.dim, s.model)
+	}
+	return nil
 }
 
 func markSuperseded(ctx context.Context, tx pgx.Tx, oldIDs []int64, newID int64) ([]int64, error) {
@@ -434,15 +472,29 @@ func (s *pgStore) GetDocument(ctx context.Context, id int64) (*Document, error) 
 	return &d, rows.Err()
 }
 
+// DeleteDocument removes an entry. Entries it had superseded take over its place in the
+// history (see sqliteRelinkSuccessors).
 func (s *pgStore) DeleteDocument(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM documents WHERE id = $1`, id)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `
+UPDATE documents p SET superseded_by = d.superseded_by,
+	status = CASE WHEN d.superseded_by IS NULL THEN 'active' ELSE 'superseded' END,
+	updated_at = now()
+FROM documents d WHERE d.id = $1 AND p.superseded_by = $1`, id); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM documents WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func vectorLiteral(v []float32) string {
