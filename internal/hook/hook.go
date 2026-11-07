@@ -202,6 +202,14 @@ func loadSeen(session string) []int64 {
 	return ids
 }
 
+// ForgetShown resets the list of entries already injected into a session. After /compact
+// the context is a summary, so earlier injections may be gone and are allowed again.
+func ForgetShown(session string) {
+	if p := seenPath(session); p != "" {
+		_ = os.Remove(p)
+	}
+}
+
 func saveSeen(session string, ids []int64) {
 	p := seenPath(session)
 	if p == "" {
