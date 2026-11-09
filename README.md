@@ -15,6 +15,7 @@ projects, finds them again when they matter, and replaces what is outdated. Ever
   is picked up by a review when the session ends.
 - **Look up.** On every prompt, the few notes that match the task are added to the context automatically.
 - **Keep current.** A new fact that contradicts an old one replaces it. The old one is kept as history.
+  `/knowledge-base:consolidate` merges overlapping entries and shows what nobody has used for a while.
 
 Notes belong either to one project (the repository) or apply everywhere, like your personal preferences:
 
