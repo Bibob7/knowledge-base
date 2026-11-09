@@ -209,3 +209,23 @@ func TestRunWaitsForARunningEvaluation(t *testing.T) {
 		t.Errorf("SessionEnd must evaluate once the sweep is done: %v, %d calls", err, len(*e.inputs))
 	}
 }
+
+type fixedRunner string
+
+func (f fixedRunner) Run(context.Context, string, string) (string, error) { return string(f), nil }
+
+func TestRunDropsProjectFactsWithoutProject(t *testing.T) {
+	e := newRunEnv(t)
+	e.d.Runner = fixedRunner(`{"facts":[
+		{"content":"The build of this repository needs the flag -tags integration.","scope":"project"},
+		{"content":"The user prefers short answers in German without filler.","scope":"global"}]}`)
+	e.appendLines(t, userLine("first "+long), userLine("second "+long), userLine("third "+long))
+	// e.g. a sweep of a session whose worktree was deleted meanwhile
+	if err := e.d.Run(context.Background(), Options{Transcript: e.path, SessionID: "s1", Project: ""}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := e.st.ListDocuments(context.Background(), "", "", false, 10)
+	if err != nil || len(list) != 1 || list[0].Project != "" || !strings.Contains(list[0].Title, "prefers") {
+		t.Errorf("only the global fact may be stored: %+v, err %v", list, err)
+	}
+}

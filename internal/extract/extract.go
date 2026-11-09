@@ -189,6 +189,12 @@ func (d Deps) process(ctx context.Context, o Options, facts []Fact) error {
 		project := o.Project
 		if f.Scope == "global" {
 			project = ""
+		} else if project == "" {
+			// The project is unknown (no git repository, or its folder is gone, e.g. a
+			// deleted worktree). Stored without project the fact would show up in every
+			// project, so it is dropped.
+			d.Logf("discarded (project fact, but the project is unknown): %.80s", f.Content)
+			continue
 		}
 		vecs, err := d.Embed.Embed(ctx, []string{d.DocPrefix + f.Content})
 		if err != nil {
