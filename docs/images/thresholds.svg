@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 200" width="900" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="200" rx="16" fill="#F5F2EA"/>
+<text x="60" y="58" font-size="12" fill="#5C6476">0.40</text>
+<text x="860" y="58" font-size="12" fill="#5C6476" text-anchor="end">1.0</text>
+<rect x="60" y="66" width="160" height="30" fill="#E3DED2"/>
+<rect x="220" y="66" width="240" height="30" fill="#DCE6F5"/>
+<rect x="460" y="66" width="373" height="30" fill="#F6DCC8"/>
+<rect x="833" y="66" width="27" height="30" fill="#121A2B"/>
+<g font-size="13" font-weight="600" text-anchor="middle">
+<text x="140" y="86" fill="#5C6476">ignored</text>
+<text x="340" y="86" fill="#2F62B3">injected by the hook</text>
+<text x="646" y="86" fill="#B4561B">“similar”: a model double-checks</text>
+</g>
+<g stroke="#121A2B" stroke-width="2"><line x1="167" y1="62" x2="167" y2="104"/><line x1="220" y1="62" x2="220" y2="104"/><line x1="460" y1="62" x2="460" y2="104"/><line x1="833" y1="62" x2="833" y2="104"/></g>
+<g font-size="13" fill="#4A5468">
+<text x="163" y="122" text-anchor="end" font-weight="700" fill="#121A2B">0.48</text>
+<text x="163" y="140" text-anchor="end">off-topic prompts</text>
+<text x="163" y="156" text-anchor="end">stayed below</text>
+<text x="224" y="122" font-weight="700" fill="#121A2B">0.52</text>
+<text x="224" y="140">hook injects the note</text>
+<text x="464" y="122" font-weight="700" fill="#121A2B">0.70</text>
+<text x="464" y="140">a new fact is checked</text>
+<text x="464" y="156">against old ones</text>
+<text x="860" y="122" text-anchor="end" font-weight="700" fill="#121A2B">0.98</text>
+<text x="860" y="140" text-anchor="end">practically identical,</text>
+<text x="860" y="156" text-anchor="end">discarded</text>
+</g>
+<text x="450" y="186" text-anchor="middle" font-size="13" fill="#4A5468">Values for bge-m3. A contradiction and a paraphrase both score about 0.89–0.96, so the number alone cannot tell them apart.</text>
+</svg>

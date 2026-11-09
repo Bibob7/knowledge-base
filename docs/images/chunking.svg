@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 210" width="900" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="210" rx="16" fill="#F5F2EA"/>
+<text x="40" y="34" font-size="12" font-weight="600" fill="#5C6476" letter-spacing="1">A DOCUMENT</text>
+<g fill="#FBFAF6" stroke="#D9D3C4"><rect x="40" y="44" width="210" height="32"/><rect x="250" y="44" width="170" height="32"/><rect x="420" y="44" width="180" height="32"/><rect x="600" y="44" width="60" height="32"/><rect x="660" y="44" width="200" height="32"/></g>
+<g font-size="13" fill="#4A5468" text-anchor="middle"><text x="145" y="65">Paragraph 1</text><text x="335" y="65">Paragraph 2</text><text x="510" y="65">Paragraph 3</text><text x="630" y="65">P. 4</text><text x="760" y="65">Paragraph 5</text></g>
+<rect x="40" y="100" width="380" height="34" rx="6" fill="#E8833A" fill-opacity="0.35"/>
+<rect x="380" y="100" width="300" height="34" rx="6" fill="#2F62B3" fill-opacity="0.3"/>
+<rect x="640" y="100" width="220" height="34" rx="6" fill="#E8833A" fill-opacity="0.35"/>
+<g font-size="13" font-weight="600" fill="#121A2B"><text x="56" y="122">Chunk 1 · ≈ 1,200 characters</text><text x="452" y="122">Chunk 2</text><text x="718" y="122">Chunk 3</text></g>
+<g stroke="#121A2B" stroke-width="1.5" fill="none"><path d="M380 140v8h40v-8"/><path d="M640 140v8h40v-8"/></g>
+<g font-size="12" fill="#4A5468" text-anchor="middle"><text x="400" y="166">≈ 150 characters shared</text><text x="660" y="166">≈ 150 characters shared</text></g>
+<text x="450" y="194" text-anchor="middle" font-size="13" fill="#4A5468">Cut at paragraph boundaries; only a paragraph that is too long is cut hard. A short fact is exactly one chunk.</text>
+</svg>

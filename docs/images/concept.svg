@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5C6476"/></marker></defs>
+<rect width="900" height="250" rx="16" fill="#F5F2EA"/>
+<g font-size="14" fill="#4A5468">
+<rect x="30" y="28" width="250" height="150" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<rect x="30" y="28" width="250" height="6" rx="3" fill="#E8833A"/>
+<text x="52" y="68" font-size="20" font-weight="700" fill="#B4561B">1 · Remember</text>
+<text x="52" y="100">You correct Claude or make a</text>
+<text x="52" y="120">decision: Claude writes it</text>
+<text x="52" y="140">down right away.</text>
+<rect x="325" y="28" width="250" height="150" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<rect x="325" y="28" width="250" height="6" rx="3" fill="#2F62B3"/>
+<text x="347" y="68" font-size="20" font-weight="700" fill="#2F62B3">2 · Look up</text>
+<text x="347" y="100">On a new task, Claude first</text>
+<text x="347" y="120">checks what is already known</text>
+<text x="347" y="140">about it.</text>
+<rect x="620" y="28" width="250" height="150" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<rect x="620" y="28" width="250" height="6" rx="3" fill="#121A2B"/>
+<text x="642" y="68" font-size="20" font-weight="700" fill="#121A2B">3 · Keep current</text>
+<text x="642" y="100">Outdated notes are replaced</text>
+<text x="642" y="120">instead of piling up. The</text>
+<text x="642" y="140">history is kept.</text>
+</g>
+<path d="M284 103H319" stroke="#5C6476" stroke-width="2" marker-end="url(#a)"/>
+<path d="M579 103H614" stroke="#5C6476" stroke-width="2" marker-end="url(#a)"/>
+<text x="450" y="222" text-anchor="middle" font-size="15" fill="#121A2B">Like a colleague who has been on the team for ages <tspan font-weight="600">and takes notes</tspan>. Nobody maintains it by hand.</text>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="250" rx="16" fill="#F5F2EA"/>
+<g font-size="14">
+<rect x="24" y="24" width="270" height="160" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<text x="44" y="52" font-size="12" font-weight="600" fill="#B4561B" letter-spacing="1">MONDAY · SESSION 1</text>
+<text x="44" y="84" fill="#121A2B"><tspan font-weight="600">You:</tspan> Please always use</text>
+<text x="44" y="104" fill="#121A2B">Conventional Commits.</text>
+<text x="44" y="140" fill="#2F62B3"><tspan font-weight="600">Claude:</tspan> feat: add login ✓</text>
+<rect x="315" y="24" width="270" height="160" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<text x="335" y="52" font-size="12" font-weight="600" fill="#B4561B" letter-spacing="1">TUESDAY · SESSION 2</text>
+<text x="335" y="84" fill="#2F62B3"><tspan font-weight="600">Claude:</tspan> Update login stuff</text>
+<text x="335" y="120" fill="#121A2B"><tspan font-weight="600">You:</tspan> I told you that</text>
+<text x="335" y="140" fill="#121A2B">yesterday …</text>
+<rect x="606" y="24" width="270" height="160" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<text x="626" y="52" font-size="12" font-weight="600" fill="#B4561B" letter-spacing="1">WEDNESDAY · SESSION 3</text>
+<text x="626" y="84" fill="#2F62B3"><tspan font-weight="600">Claude:</tspan> Fixed things</text>
+<text x="626" y="120" fill="#121A2B"><tspan font-weight="600">You:</tspan> Again?!</text>
+</g>
+<text x="450" y="222" text-anchor="middle" font-size="15" fill="#121A2B">Claude is smart, but when a session ends, <tspan font-weight="600">everything it learned is gone</tspan>.</text>
+</svg>

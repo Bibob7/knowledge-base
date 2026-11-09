@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 250" width="960" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5C6476"/></marker></defs>
+<rect width="960" height="250" rx="16" fill="#F5F2EA"/>
+<rect x="20" y="86" width="170" height="64" rx="10" fill="#121A2B"/>
+<text x="105" y="112" text-anchor="middle" font-size="12" font-weight="600" fill="#B9C3D6" letter-spacing="1">QUESTION</text>
+<text x="105" y="134" text-anchor="middle" font-size="15" fill="#F5F2EA">“How do I commit?”</text>
+<rect x="270" y="24" width="240" height="78" rx="10" fill="#DCE6F5" stroke="#2F62B3"/>
+<text x="290" y="54" font-size="16" font-weight="700" fill="#2F62B3">Vector search</text>
+<text x="290" y="76" font-size="13" fill="#4A5468">finds meaning, even with</text>
+<text x="290" y="92" font-size="13" fill="#4A5468">completely different words</text>
+<rect x="270" y="134" width="240" height="78" rx="10" fill="#F6DCC8" stroke="#E8833A"/>
+<text x="290" y="164" font-size="16" font-weight="700" fill="#B4561B">Full text (FTS5)</text>
+<text x="290" y="186" font-size="13" fill="#4A5468">a word index like a book’s:</text>
+<text x="290" y="202" font-size="13" fill="#4A5468">finds exact terms</text>
+<rect x="590" y="86" width="150" height="64" rx="10" fill="#FBFAF6" stroke="#121A2B" stroke-width="2"/>
+<text x="665" y="112" text-anchor="middle" font-size="16" font-weight="700" fill="#121A2B">RRF</text>
+<text x="665" y="132" text-anchor="middle" font-size="13" fill="#4A5468">merges by rank</text>
+<rect x="800" y="86" width="140" height="64" rx="10" fill="#121A2B"/>
+<text x="870" y="112" text-anchor="middle" font-size="16" font-weight="700" fill="#F5F2EA">Top hits</text>
+<text x="870" y="132" text-anchor="middle" font-size="12" fill="#B9C3D6">active entries only</text>
+<g stroke="#5C6476" stroke-width="2" fill="none">
+<path d="M194 108L264 70" marker-end="url(#a)"/><path d="M194 128L264 168" marker-end="url(#a)"/>
+<path d="M514 66L584 106" marker-end="url(#a)"/><path d="M514 172L584 132" marker-end="url(#a)"/>
+<path d="M744 118H794" marker-end="url(#a)"/>
+</g>
+<text x="480" y="238" text-anchor="middle" font-size="13" fill="#4A5468">Vectors understand paraphrases, full text finds exact names like “pgvector” or an error code. Together they are robust.</text>
+</svg>

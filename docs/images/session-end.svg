@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 250" width="960" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5C6476"/></marker></defs>
+<rect width="960" height="250" rx="16" fill="#F5F2EA"/>
+<g fill="#FBFAF6" stroke="#D9D3C4"><rect x="20" y="24" width="208" height="126" rx="10"/><rect x="262" y="24" width="208" height="126" rx="10"/><rect x="504" y="24" width="208" height="126" rx="10"/></g>
+<rect x="746" y="24" width="194" height="126" rx="10" fill="#F6DCC8" stroke="#E8833A"/>
+<g stroke="#5C6476" stroke-width="2"><path d="M230 87H256" marker-end="url(#a)"/><path d="M472 87H498" marker-end="url(#a)"/><path d="M714 87H740" marker-end="url(#a)"/></g>
+<g font-size="16" font-weight="700" fill="#121A2B"><text x="38" y="56">Session ends</text><text x="280" y="56">Read transcript</text><text x="522" y="56">Extract facts</text><text x="764" y="56" fill="#B4561B">Compare, store</text></g>
+<g font-size="13" fill="#4A5468">
+<text x="38" y="84">A hook starts a background</text><text x="38" y="102">process and returns</text><text x="38" y="120">immediately.</text>
+<text x="280" y="84">Only your messages and</text><text x="280" y="102">Claude’s text, at most</text><text x="280" y="120">100,000 characters.</text>
+<text x="522" y="84">A lean Claude run without</text><text x="522" y="102">tools: better 0–2 strong</text><text x="522" y="120">facts than many weak ones.</text>
+<text x="764" y="84">Duplicates are dropped;</text><text x="764" y="102">for similar ones a model</text><text x="764" y="120">says add, skip, supersede.</text>
+</g>
+<rect x="20" y="172" width="920" height="58" rx="10" fill="none" stroke="#2F62B3" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="40" y="197" font-size="14" font-weight="700" fill="#2F62B3">Safety net for the safety net: the sweep</text>
+<text x="40" y="217" font-size="13" fill="#4A5468">Terminal closed or crashed? On the next start a silent sweep catches up: idle ≥ 30 min, at most 7 days old, at most 3 per run.</text>
+</svg>

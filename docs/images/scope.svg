@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 290" width="900" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="900" height="290" rx="16" fill="#F5F2EA"/>
+<rect x="30" y="24" width="840" height="74" rx="12" fill="#F6DCC8" stroke="#E8833A" stroke-width="2.5"/>
+<text x="54" y="54" font-size="13" font-weight="600" fill="#B4561B" letter-spacing="1">GENERAL KNOWLEDGE · APPLIES IN EVERY PROJECT</text>
+<text x="54" y="80" font-size="15" fill="#121A2B">“Commits use the Conventional Commits format”</text>
+<g font-size="15">
+<rect x="30" y="122" width="260" height="104" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<text x="54" y="152" font-size="13" font-weight="600" fill="#5C6476" letter-spacing="1">PROJECT · SHOP</text>
+<text x="54" y="182" fill="#5C6476">“Prices in cents”</text>
+<rect x="320" y="122" width="260" height="104" rx="12" fill="#F6DCC8" stroke="#E8833A" stroke-width="2.5"/>
+<text x="344" y="152" font-size="13" font-weight="600" fill="#B4561B" letter-spacing="1">PROJECT · APP</text>
+<text x="344" y="210" font-size="13" font-weight="600" fill="#B4561B">← you are here</text>
+<text x="344" y="182" fill="#121A2B">“Tests run against SQLite”</text>
+<rect x="610" y="122" width="260" height="104" rx="12" fill="#FBFAF6" stroke="#D9D3C4"/>
+<text x="634" y="152" font-size="13" font-weight="600" fill="#5C6476" letter-spacing="1">PROJECT · BLOG</text>
+<text x="634" y="182" fill="#5C6476">“Deploy via Git tag”</text>
+</g>
+<text x="450" y="264" text-anchor="middle" font-size="15" fill="#121A2B">Orange: what a search in project “app” finds. <tspan font-weight="600">Its own project plus general</tspan>, never shop or blog.</text>
+</svg>
