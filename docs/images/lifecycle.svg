@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" font-family="Inter, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#5C6476"/></marker></defs>
+<rect width="900" height="250" rx="16" fill="#F5F2EA"/>
+<text x="40" y="40" font-size="12" font-weight="600" fill="#5C6476" letter-spacing="1">BEFORE</text>
+<rect x="40" y="80" width="250" height="84" rx="10" fill="#FBFAF6" stroke="#E8833A" stroke-width="2"/>
+<text x="60" y="110" font-size="13" font-weight="700" fill="#B4561B">#12 · active</text>
+<text x="60" y="140" font-size="15" fill="#121A2B">“We run Postgres in Docker.”</text>
+<path d="M298 122H404" stroke="#5C6476" stroke-width="2" marker-end="url(#a)"/>
+<text x="351" y="108" text-anchor="middle" font-size="11" fill="#4A5468" font-family="JetBrains Mono, Menlo, Consolas, monospace">remember with</text>
+<text x="351" y="142" text-anchor="middle" font-size="11" fill="#4A5468" font-family="JetBrains Mono, Menlo, Consolas, monospace">supersedes=[12]</text>
+<text x="420" y="40" font-size="12" font-weight="600" fill="#5C6476" letter-spacing="1">AFTER</text>
+<rect x="420" y="54" width="250" height="74" rx="10" fill="#F5F2EA" stroke="#B9B2A3" stroke-dasharray="6 4"/>
+<text x="440" y="82" font-size="13" font-weight="700" fill="#8A8F9C">#12 · superseded</text>
+<text x="440" y="108" font-size="15" fill="#8A8F9C">“We run Postgres in Docker.”</text>
+<rect x="420" y="152" width="250" height="74" rx="10" fill="#F6DCC8" stroke="#E8833A" stroke-width="2"/>
+<text x="440" y="180" font-size="13" font-weight="700" fill="#B4561B">#57 · active</text>
+<text x="440" y="206" font-size="15" fill="#121A2B">“SQLite is the default.”</text>
+<path d="M545 132V146" stroke="#5C6476" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<g font-size="13" fill="#4A5468">
+<text x="690" y="84">no longer found by search,</text><text x="690" y="102">kept as history</text>
+<text x="690" y="182">the current fact;</text><text x="690" y="200">#12 points to it</text>
+</g>
+</svg>
