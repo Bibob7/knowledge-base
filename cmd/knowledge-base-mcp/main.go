@@ -19,6 +19,7 @@ import (
 	"github.com/Bibob7/knowledge-base/internal/chunk"
 	"github.com/Bibob7/knowledge-base/internal/config"
 	"github.com/Bibob7/knowledge-base/internal/embed"
+	"github.com/Bibob7/knowledge-base/internal/project"
 	"github.com/Bibob7/knowledge-base/internal/secrets"
 	"github.com/Bibob7/knowledge-base/internal/store"
 )
@@ -28,6 +29,29 @@ import (
 //
 //go:embed instructions.md
 var instructions string
+
+// sessionProject is the project of the session that started this server: Claude Code
+// starts it in the session's working directory. KB_PROJECT overrides it, as for the hook.
+func sessionProject(ctx context.Context) string {
+	if p := strings.ToLower(strings.TrimSpace(os.Getenv("KB_PROJECT"))); p != "" {
+		return p
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return project.FromDir(ctx, wd)
+}
+
+// sessionInstructions names the project resolved by the server, so Claude uses exactly
+// the name the hooks use instead of deriving it (worktrees, override file).
+func sessionInstructions(proj string) string {
+	if proj == "" {
+		return instructions
+	}
+	return instructions + "\nTHIS SESSION'S PROJECT: \"" + proj + "\" (resolved by the server from the session's directory, " +
+		"as the hooks do). Use exactly this name as project; derive it yourself only if you work in another repository.\n"
+}
 
 // version is set at build time (-ldflags "-X main.version=...") by scripts/kb.
 var version = "dev"
@@ -79,7 +103,7 @@ func run() error {
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "knowledge-base", Version: version},
-		&mcp.ServerOptions{Instructions: instructions})
+		&mcp.ServerOptions{Instructions: sessionInstructions(sessionProject(ctx))})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "remember",

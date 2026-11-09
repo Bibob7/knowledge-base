@@ -3,8 +3,9 @@ search_knowledge, remember, supersede, list_documents, get_document, add_documen
 are deferred, load all of them with ONE ToolSearch call first. If the server is unavailable, continue the task
 normally and mention it once; never block on it.
 
-PROJECT SCOPE: project = lowercase basename of the git root (git rev-parse --show-toplevel). Outside a git repo,
-omit it. Omit project on remember for cross-project knowledge (user preferences, general facts). Pass project on
+PROJECT SCOPE: project = lowercase folder name of the main repository; a git worktree uses the repository it
+belongs to (parent folder of: git rev-parse --path-format=absolute --git-common-dir), a file
+.knowledge-base-project in the repo root overrides it. Outside a git repo, omit it. Omit project on remember for cross-project knowledge (user preferences, general facts). Pass project on
 search_knowledge to get that project's entries plus the cross-project ones.
 
 RETRIEVE

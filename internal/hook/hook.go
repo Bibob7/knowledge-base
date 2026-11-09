@@ -12,14 +12,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/Bibob7/knowledge-base/internal/embed"
+	"github.com/Bibob7/knowledge-base/internal/project"
 	"github.com/Bibob7/knowledge-base/internal/store"
 )
 
@@ -58,9 +57,9 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, d Deps) error {
 	if err := json.NewDecoder(io.LimitReader(in, 4<<20)).Decode(&inp); err != nil {
 		return fmt.Errorf("hook input: %w", err)
 	}
-	project := os.Getenv("KB_PROJECT")
-	if project == "" {
-		project = ProjectFromDir(ctx, inp.Cwd)
+	proj := strings.ToLower(strings.TrimSpace(os.Getenv("KB_PROJECT")))
+	if proj == "" {
+		proj = project.FromDir(ctx, inp.Cwd)
 	}
 	seen := loadSeen(inp.SessionID)
 
@@ -69,7 +68,7 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, d Deps) error {
 	var err error
 	switch inp.HookEventName {
 	case "UserPromptSubmit":
-		text, shown, err = d.onPrompt(ctx, inp.Prompt, project, seen)
+		text, shown, err = d.onPrompt(ctx, inp.Prompt, proj, seen)
 	default:
 		return nil
 	}
@@ -140,20 +139,8 @@ func formatLine(id int64, project, content string) string {
 	return fmt.Sprintf("- #%d [%s] %s", id, scope, truncate(content, maxEntryRunes))
 }
 
-// ProjectFromDir returns the lowercase folder name of the git root of dir
-// (empty outside a repo). Matches the rule in cmd/knowledge-base-mcp/instructions.md.
-func ProjectFromDir(ctx context.Context, dir string) string {
-	if dir == "" {
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	b, err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.ToLower(filepath.Base(strings.TrimSpace(string(b))))
-}
+// ProjectFromDir returns the project of dir (see package project).
+func ProjectFromDir(ctx context.Context, dir string) string { return project.FromDir(ctx, dir) }
 
 func truncate(s string, n int) string {
 	if utf8.RuneCountInString(s) <= n {
