@@ -179,11 +179,16 @@ func (s *sqliteStore) migrate(ctx context.Context) error {
 			INSERT INTO chunks_fts (rowid, content) VALUES (new.id, new.content);
 		END`,
 		`INSERT INTO kb_meta (key, value) VALUES ('schema_version', '` + sqliteSchemaVersion + `') ON CONFLICT (key) DO NOTHING`,
+		sqliteUsageTable,
 	}
 	for _, q := range stmts {
 		if _, err := tx.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("migration: %w", err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO kb_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING`,
+		usageSinceKey, time.Now().UTC().Format(timeLayout)); err != nil {
+		return fmt.Errorf("migration: %w", err)
 	}
 	meta := map[string]string{}
 	rows, err := tx.QueryContext(ctx, `SELECT key, value FROM kb_meta`)
@@ -682,7 +687,11 @@ ORDER BY d.updated_at DESC, d.id DESC LIMIT ?`, append(args, limit)...)
 		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.fillUsage(ctx, out)
+	return out, nil
 }
 
 // scanDocumentInfo scans id, title, source, project, kind, status, superseded_by, tags,
@@ -722,6 +731,7 @@ func (s *sqliteStore) GetDocument(ctx context.Context, id int64) (*Document, err
 		return nil, err
 	}
 	d := Document{DocumentInfo: info}
+	d.Usage = s.usageOf(ctx, []int64{id})[id]
 	rows, err := s.db.QueryContext(ctx, `SELECT content FROM chunks WHERE document_id = ? ORDER BY idx`, id)
 	if err != nil {
 		return nil, err
@@ -845,8 +855,14 @@ func (s *sqliteStore) Snapshot(ctx context.Context, limit int) (*Snapshot, error
 	if err := crow.Err(); err != nil {
 		return nil, err
 	}
+	ids := make([]int64, len(snap.Docs))
+	for i, d := range snap.Docs {
+		ids[i] = d.ID
+	}
+	usage := s.usageOf(ctx, ids)
 	for i := range snap.Docs {
 		d := &snap.Docs[i]
+		d.Usage = usage[d.ID]
 		if n := counts[d.ID]; n > 0 {
 			for j := range d.Vec {
 				d.Vec[j] /= float32(n)

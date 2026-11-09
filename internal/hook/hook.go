@@ -79,6 +79,10 @@ func Run(ctx context.Context, in io.Reader, out io.Writer, d Deps) error {
 		return nil
 	}
 	saveSeen(inp.SessionID, append(seen, shown...))
+	// Usage counters are a hint for reviews; failing to count must not cost the injection.
+	if err := d.Store.RecordUse(ctx, shown, store.UseInjected); err != nil {
+		d.debugf("recording usage failed: %v", err)
+	}
 
 	var o output
 	o.HookSpecificOutput.HookEventName = inp.HookEventName

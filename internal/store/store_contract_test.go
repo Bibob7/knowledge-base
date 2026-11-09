@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // opener opens the backend under test on the same (initially empty) database each
@@ -58,6 +59,7 @@ func runContract(t *testing.T, open opener) {
 	defer func() { s.Close() }()
 
 	t.Run("basics", func(t *testing.T) { contractBasics(t, s) })
+	t.Run("usage", func(t *testing.T) { contractUsage(t, s) })
 	all := contractScopedSearch(t, s)
 
 	// A different model must be refused until the data is re-embedded.
@@ -113,7 +115,7 @@ func runContract(t *testing.T, open opener) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := len(all) + 2; snap.Total != want { // + the two entries left from "basics"
+	if want := len(all) + 2 + 2; snap.Total != want { // + the entries left from "basics" and "usage"
 		t.Errorf("entries after reindex: %d, want %d", snap.Total, want)
 	}
 	if len(snap.Docs) != 5 || len(snap.Docs[0].Vec) != newDim {
@@ -425,4 +427,90 @@ func contractScopedSearch(t *testing.T, s Store) []seeded {
 		t.Fatalf("unscoped search: %d hits, err %v", len(hits), err)
 	}
 	return all
+}
+
+func contractUsage(t *testing.T, s Store) {
+	ctx := context.Background()
+	const p = "usage"
+	since, err := s.UsageSince(ctx)
+	if err != nil || since.IsZero() || since.After(time.Now()) {
+		t.Fatalf("UsageSince = %v, %v", since, err)
+	}
+	add := func(text string, i int, project string) int64 {
+		t.Helper()
+		res, err := s.AddDocument(ctx, DocumentInput{Title: text, Project: project, Kind: "fact",
+			Chunks: []ChunkInput{{Content: text, Embedding: unitVec(i)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.ID
+	}
+	a := add("usage entry a", 1, p)
+	b := add("usage entry b", 2, p)
+	c := add("usage entry c", 3, "")
+	time.Sleep(20 * time.Millisecond)
+	mark := time.Now()
+	time.Sleep(20 * time.Millisecond)
+
+	if err := s.RecordUse(ctx, []int64{a, a, 987654321}, UseInjected); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordUse(ctx, []int64{a}, UseRetrieved); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordUse(ctx, nil, UseRetrieved); err != nil {
+		t.Fatal(err)
+	}
+	d, err := s.GetDocument(ctx, a)
+	if err != nil || d.Usage.Injected != 1 || d.Usage.Retrieved != 1 || d.Usage.LastUsed == nil || d.Usage.LastUsed.Before(mark) {
+		t.Errorf("usage of a: %+v, err %v", d.Usage, err)
+	}
+	list, err := s.ListDocuments(ctx, "", p, false, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range list {
+		if x.ID == b && (x.Usage.Injected != 0 || x.Usage.LastUsed != nil) {
+			t.Errorf("b was never used: %+v", x.Usage)
+		}
+		if x.ID == a && x.Usage.Injected != 1 {
+			t.Errorf("list: usage of a %+v", x.Usage)
+		}
+	}
+	snap, err := s.Snapshot(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range snap.Docs {
+		if x.ID == a && x.Usage.Retrieved != 1 {
+			t.Errorf("snapshot: usage of a %+v", x.Usage)
+		}
+	}
+
+	// b and c (global) were not used since mark, a was; the oldest comes first.
+	unused, err := s.Unused(ctx, p, mark, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, x := range unused {
+		if x.ID == a || x.ID == b || x.ID == c {
+			ids = append(ids, x.ID)
+		}
+	}
+	if fmt.Sprint(ids) != fmt.Sprint([]int64{b, c}) {
+		t.Errorf("unused since mark: %v, want %v", ids, []int64{b, c})
+	}
+	// Entries created after the cut-off are too young to count as unused.
+	if young, _ := s.Unused(ctx, p, mark.Add(-time.Hour), 50); len(young) != 0 {
+		t.Errorf("entries created after the cut-off must not be reported: %+v", young)
+	}
+
+	// Deleting an entry removes its counters with it.
+	if err := s.DeleteDocument(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordUse(ctx, []int64{a}, UseInjected); err != nil {
+		t.Errorf("recording a deleted entry must be ignored: %v", err)
+	}
 }

@@ -47,7 +47,18 @@ LIMIT $1`, limit)
 		}
 		snap.Docs = append(snap.Docs, d)
 	}
-	return snap, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ids := make([]int64, len(snap.Docs))
+	for i, d := range snap.Docs {
+		ids[i] = d.ID
+	}
+	usage := s.usageOf(ctx, ids)
+	for i := range snap.Docs {
+		snap.Docs[i].Usage = usage[snap.Docs[i].ID]
+	}
+	return snap, nil
 }
 
 // parseVector parses pgvector's text form "[0.1,0.2,...]".
