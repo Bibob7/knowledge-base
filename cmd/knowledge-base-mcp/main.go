@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -132,8 +133,9 @@ func run() error {
 	}, a.search)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_documents",
-		Description: "Lists entries (most recently changed first), optionally filtered by project/tag. Shows what was learned recently.",
+		Name: "list_documents",
+		Description: "Lists entries (most recently changed first), optionally filtered by project/tag. Shows what was learned recently. " +
+			"Each entry shows how often it was injected or retrieved; with unused_days it lists entries nobody used for that long.",
 	}, a.listDocuments)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -347,9 +349,12 @@ func (a *app) search(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (
 		return nil, searchOut{}, err
 	}
 	out := searchOut{Hits: make([]searchHit, len(hits))}
+	ids := make([]int64, len(hits))
 	for i, h := range hits {
 		out.Hits[i] = searchHit{h.DocumentID, h.Title, h.Project, h.Kind, h.Source, nonNil(h.Tags), h.ChunkIndex, round3(h.Score), h.Content}
+		ids[i] = h.DocumentID
 	}
+	a.recordUse(ctx, ids)
 	return nil, out, nil
 }
 
@@ -359,6 +364,7 @@ type listIn struct {
 	Project           string `json:"project,omitempty" jsonschema:"Project plus cross-project entries; empty = all"`
 	Tag               string `json:"tag,omitempty" jsonschema:"Optional tag filter"`
 	IncludeSuperseded bool   `json:"include_superseded,omitempty" jsonschema:"Also show outdated entries"`
+	UnusedDays        int    `json:"unused_days,omitempty" jsonschema:"Only active entries that were neither injected nor retrieved in the last N days (least recently used first), e.g. to review stale knowledge; tag is ignored"`
 	Limit             int    `json:"limit,omitempty" jsonschema:"Maximum number (default 50, max 200)"`
 }
 
@@ -373,27 +379,78 @@ type docInfo struct {
 	Tags         []string `json:"tags"`
 	Chunks       int      `json:"chunks"`
 	UpdatedAt    string   `json:"updated_at"`
+	Injected     int      `json:"injected"`
+	Retrieved    int      `json:"retrieved"`
+	LastUsed     string   `json:"last_used,omitempty"`
 }
 
 type listOut struct {
 	Documents []docInfo `json:"documents"`
+	Note      string    `json:"note,omitempty"`
 }
 
+const timeFormat = "2006-01-02 15:04:05Z07:00"
+
 func toDocInfo(d store.DocumentInfo) docInfo {
-	return docInfo{d.ID, d.Title, d.Project, d.Kind, d.Status, d.SupersededBy, d.Source, nonNil(d.Tags), d.Chunks,
-		d.UpdatedAt.Format("2006-01-02 15:04:05Z07:00")}
+	out := docInfo{ID: d.ID, Title: d.Title, Project: d.Project, Kind: d.Kind, Status: d.Status,
+		SupersededBy: d.SupersededBy, Source: d.Source, Tags: nonNil(d.Tags), Chunks: d.Chunks,
+		UpdatedAt: d.UpdatedAt.Format(timeFormat), Injected: d.Usage.Injected, Retrieved: d.Usage.Retrieved}
+	if d.Usage.LastUsed != nil {
+		out.LastUsed = d.Usage.LastUsed.Format(timeFormat)
+	}
+	return out
+}
+
+// recordUse counts entries Claude retrieved. A failure is only logged: the counters are
+// a hint for reviews and must never cost a result.
+// recordUse counts a retrieval. It is a write; a short timeout keeps a held write lock
+// (another session, a reindex) from delaying the tool result.
+func (a *app) recordUse(ctx context.Context, ids []int64) {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	if err := a.store.RecordUse(ctx, ids, store.UseRetrieved); err != nil {
+		log.Printf("recording usage: %v", err)
+	}
 }
 
 func (a *app) listDocuments(ctx context.Context, _ *mcp.CallToolRequest, in listIn) (*mcp.CallToolResult, listOut, error) {
-	docs, err := a.store.ListDocuments(ctx, in.Tag, in.Project, in.IncludeSuperseded, clamp(in.Limit, 50, 200))
+	limit := clamp(in.Limit, 50, 200)
+	var docs []store.DocumentInfo
+	var note string
+	var err error
+	if in.UnusedDays > 0 {
+		docs, note, err = a.unused(ctx, in.Project, in.UnusedDays, limit)
+	} else {
+		docs, err = a.store.ListDocuments(ctx, in.Tag, in.Project, in.IncludeSuperseded, limit)
+	}
 	if err != nil {
 		return nil, listOut{}, err
 	}
-	out := listOut{Documents: make([]docInfo, len(docs))}
+	out := listOut{Documents: make([]docInfo, len(docs)), Note: note}
 	for i, d := range docs {
 		out.Documents[i] = toDocInfo(d)
 	}
 	return nil, out, nil
+}
+
+// unused lists entries not used for `days` days. Usage is only known since tracking
+// started; before that has run for `days` days, nothing can be called unused.
+func (a *app) unused(ctx context.Context, project string, days, limit int) ([]store.DocumentInfo, string, error) {
+	before := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	since, err := a.store.UsageSince(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if since.IsZero() || since.After(before) {
+		return []store.DocumentInfo{}, fmt.Sprintf("Usage is tracked since %s; entries can only be called unused for %d days "+
+			"once tracking has run that long.", since.Format("2006-01-02"), days), nil
+	}
+	docs, err := a.store.Unused(ctx, project, before, limit)
+	if err != nil {
+		return nil, "", err
+	}
+	return docs, "Entries that were neither injected nor retrieved in the last " + strconv.Itoa(days) +
+		" days. Unused is only a hint: review them, supersede what is outdated, keep what still holds.", nil
 }
 
 // --- get_document ---
@@ -412,6 +469,7 @@ func (a *app) getDocument(ctx context.Context, _ *mcp.CallToolRequest, in idIn) 
 	if err != nil {
 		return nil, getOut{}, err
 	}
+	a.recordUse(ctx, []int64{d.ID})
 	return nil, getOut{docInfo: toDocInfo(d.DocumentInfo), Content: d.Content}, nil
 }
 

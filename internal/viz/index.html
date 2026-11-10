@@ -98,7 +98,7 @@ tr.old td { color: var(--muted); }
       <select id="fstatus"><option value="active">active</option><option value="all">all</option><option value="superseded">outdated</option></select>
     </div>
     <div style="overflow-x:auto"><table id="tbl"><thead><tr>
-      <th data-k="id">#</th><th data-k="project">Project</th><th data-k="title">Entry</th><th data-k="tags">Tags</th><th data-k="createdAt">Created</th>
+      <th data-k="id">#</th><th data-k="project">Project</th><th data-k="title">Entry</th><th data-k="tags">Tags</th><th data-k="createdAt">Created</th><th data-k="used" title="How often the entry was injected by the prompt hook or retrieved by Claude">Used</th>
     </tr></thead><tbody></tbody></table></div>
   </section>
 
@@ -289,14 +289,15 @@ function drawTable() {
   const rows = data.docs.filter(matches);
   const val = (d) => sortKey === "tags" ? d.tags.join(",") : sortKey === "project" ? projLabel(d.project) : d[sortKey];
   rows.sort((a, b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * sortDir);
-  if (!rows.length) { body.append(el("tr", {}, el("td", { colspan: 5, class: "empty" }, "No entries match"))); return; }
+  if (!rows.length) { body.append(el("tr", {}, el("td", { colspan: 6, class: "empty" }, "No entries match"))); return; }
   for (const d of rows) {
     const tr = el("tr", { class: "row" + (d.status !== "active" ? " old" : "") + (selected === d.id ? " on" : "") });
     tr.append(el("td", {}, String(d.id)),
       el("td", {}, el("span", { class: "dot", style: "background:" + projectColor(d.project) + ";margin-right:6px" }), projLabel(d.project)));
     const t = el("td", {}, d.title);
     if (d.status !== "active") t.append(" ", el("span", { class: "tag badge-old" }, "outdated"));
-    tr.append(t, el("td", {}, ...d.tags.map((x) => el("span", { class: "tag" }, x))), el("td", {}, fmtDate(d.createdAt)));
+    tr.append(t, el("td", {}, ...d.tags.map((x) => el("span", { class: "tag" }, x))), el("td", {}, fmtDate(d.createdAt)),
+      el("td", { title: d.lastUsed ? "last used " + fmtDate(d.lastUsed) : "never used" }, d.used ? d.used + "×" : "–"));
     tr.addEventListener("click", () => select(d.id));
     body.append(tr);
   }
@@ -307,7 +308,8 @@ function drawDetail() {
   const d = data.docs.find((x) => x.id === selected);
   if (!d) { panel.hidden = true; return; }
   panel.hidden = false; box.replaceChildren();
-  const meta = el("div", { class: "meta" }, `#${d.id} · ${projLabel(d.project)} · ${d.kind} · ${d.status} · created ${fmtDate(d.createdAt)}`);
+  const meta = el("div", { class: "meta" }, `#${d.id} · ${projLabel(d.project)} · ${d.kind} · ${d.status} · created ${fmtDate(d.createdAt)} · ` +
+    (d.used ? `injected ${d.injected}×, retrieved ${d.retrieved}×, last used ${fmtDate(d.lastUsed)}` : "never used"));
   box.append(meta);
   const link = (id, prefix) => {
     const a = el("span", { class: "link" }, prefix + " #" + id);

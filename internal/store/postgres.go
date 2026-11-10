@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -80,11 +81,16 @@ func (s *pgStore) migrate(ctx context.Context) error {
 		)`, s.dim),
 		`CREATE INDEX IF NOT EXISTS chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_ops)`,
 		`CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv)`,
+		pgUsageTable,
 	}
 	for _, q := range stmts {
 		if _, err := s.pool.Exec(ctx, q); err != nil {
 			return fmt.Errorf("migration: %w", err)
 		}
+	}
+	if _, err := s.pool.Exec(ctx, `INSERT INTO kb_meta (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING`,
+		usageSinceKey, time.Now().UTC().Format(timeLayout)); err != nil {
+		return fmt.Errorf("migration: %w", err)
 	}
 	// The dimension of the existing table must match the configuration.
 	var typmod int
@@ -438,7 +444,11 @@ LIMIT $4`, nilIfEmpty(tag), nilIfEmpty(project), includeSuperseded, limit)
 		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	s.fillUsage(ctx, out)
+	return out, nil
 }
 
 // GetDocument reconstructs the text from the chunks (overlaps included).
@@ -454,6 +464,7 @@ func (s *pgStore) GetDocument(ctx context.Context, id int64) (*Document, error) 
 	if err != nil {
 		return nil, err
 	}
+	d.Usage = s.usageOf(ctx, []int64{id})[id]
 	rows, err := s.pool.Query(ctx, `SELECT content FROM chunks WHERE document_id = $1 ORDER BY idx`, id)
 	if err != nil {
 		return nil, err

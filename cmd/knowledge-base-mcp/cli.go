@@ -49,6 +49,18 @@ func runSubcommand(args []string) (handled bool, code int) {
 			return true, 1
 		}
 		return true, 0
+	case "consolidate":
+		if err := runConsolidate(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return true, 1
+		}
+		return true, 0
+	case "consolidate-apply":
+		if err := runConsolidateApply(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return true, 1
+		}
+		return true, 0
 	case "reindex":
 		if err := runReindex(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -437,4 +449,165 @@ func openBrowser(url string) {
 		name = "open"
 	}
 	_ = exec.Command(name, url).Start()
+}
+
+// runConsolidate reviews groups of similar entries (see extract.Deps.Plan). It only plans:
+// it prints the proposed changes in full and saves them under a plan ID. Applying is a
+// separate command (consolidate-apply <id>), so that a permission rule for planning never
+// covers applying, and only the plan that was shown can be applied.
+func runConsolidate(args []string) error {
+	fs := flag.NewFlagSet("consolidate", flag.ContinueOnError)
+	project := fs.String("project", "", "only this project's entries (plus cross-project ones); empty = all")
+	minSim := fs.Float64("min-sim", 0, "similarity from which entries are grouped (default: the model's \"similar\" threshold)")
+	maxGroups := fs.Int("max-groups", 40, "review at most this many groups (one model call per 8 groups)")
+	unusedDays := fs.Int("unused-days", 30, "also list entries not used for this many days (0 = no list)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments %q; to apply a plan use: consolidate-apply <plan-id>", fs.Args())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	d, closeFn, err := newExtractDeps(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	d.Logf = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+	path := extract.PlanPath()
+
+	if *minSim <= 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		*minSim = cfg.SimilarMin
+	}
+	plan, err := d.Plan(ctx, extract.ConsolidateOptions{Project: *project, MinSim: *minSim, MaxGroups: *maxGroups})
+	if err != nil {
+		return err
+	}
+	changes := plan.Changes()
+	fmt.Printf("%d group(s) of similar entries reviewed (similarity >= %.2f): %d unchanged, %d change(s) proposed.\n",
+		len(plan.Actions), *minSim, len(plan.Actions)-len(changes), len(changes))
+	for _, a := range changes {
+		scope := a.Project
+		if scope == "" {
+			scope = "global"
+		}
+		fmt.Println()
+		switch a.Action {
+		case "supersede":
+			fmt.Printf("SUPERSEDE [%s] #%d replaces %s (similarity %.2f)\n", scope, a.KeepID, idList(a.Supersedes), a.Similarity)
+		case "merge":
+			fmt.Printf("MERGE [%s] a new entry replaces %s (similarity %.2f)\n", scope, idList(a.Supersedes), a.Similarity)
+		}
+		for _, e := range a.Entries {
+			mark := "  keep"
+			if contains64(a.Supersedes, e.ID) {
+				mark = "  old "
+			}
+			fmt.Printf("%s #%d: %s\n", mark, e.ID, oneLine(e.Content, 0))
+		}
+		if a.Action == "merge" {
+			fmt.Printf("  new : %s\n", oneLine(a.Content, 0))
+		}
+	}
+	if len(changes) > 0 {
+		if err := extract.SavePlan(path, plan); err != nil {
+			return err
+		}
+		fmt.Printf("\nNothing was changed yet. To apply exactly these changes: consolidate-apply %s\n", plan.ID)
+	} else if err := extract.RemovePlan(path); err != nil { // an older plan must not stay applicable
+		return err
+	}
+	if *unusedDays > 0 {
+		return printUnused(ctx, d.Store, *project, *unusedDays)
+	}
+	return nil
+}
+
+// runConsolidateApply carries out the saved plan, if it has the given ID.
+func runConsolidateApply(args []string) error {
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: consolidate-apply <plan-id> (the ID printed by consolidate)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	d, closeFn, err := newExtractDeps(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	d.Logf = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+	path := extract.PlanPath()
+	plan, err := extract.LoadPlan(path)
+	if err != nil {
+		return err
+	}
+	applied, skipped, err := d.Apply(ctx, plan, args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d change(s) applied, %d skipped.\n", applied, skipped)
+	fmt.Println("Undo a merge with delete_document on the new entry (the replaced entries become current again). " +
+		"A supersede has no direct undo: deleting the kept entry restores the replaced ones but loses the kept one.")
+	return extract.RemovePlan(path)
+}
+
+func printUnused(ctx context.Context, st store.Store, project string, days int) error {
+	before := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	since, err := st.UsageSince(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Println()
+	if since.IsZero() {
+		fmt.Println("Usage tracking has not started yet: it starts when the MCP server of this version opens the database (/reload-plugins).")
+		return nil
+	}
+	if since.After(before) {
+		fmt.Printf("Usage is tracked since %s; entries unused for %d days can be listed from %s on.\n",
+			since.Format("2006-01-02"), days, since.Add(time.Duration(days)*24*time.Hour).Format("2006-01-02"))
+		return nil
+	}
+	docs, err := st.Unused(ctx, project, before, 50)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d active entr(ies) neither injected nor retrieved in the last %d days (only a hint; review, nothing is changed):\n", len(docs), days)
+	for _, d := range docs {
+		scope := d.Project
+		if scope == "" {
+			scope = "global"
+		}
+		fmt.Printf("  #%d [%s] %s\n", d.ID, scope, oneLine(d.Title, 120))
+	}
+	return nil
+}
+
+func idList(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = fmt.Sprintf("#%d", id)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func contains64(s []int64, v int64) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func oneLine(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); n > 0 && len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }

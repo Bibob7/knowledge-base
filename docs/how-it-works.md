@@ -37,6 +37,7 @@ What the plugin ships:
 | Hooks (`hooks/hooks.json`) | retrieval per prompt, learning at session end, silent sweep of crashed sessions |
 | Skill `/knowledge-base:setup` | setup, repair and status |
 | Skill `/knowledge-base:viz` | opens the [visualisation](operations.md#visualisation) in the browser |
+| Skill `/knowledge-base:consolidate` | reviews duplicates and unused entries (see [Keeping the memory lean](#keeping-the-memory-lean)) |
 
 ### The seven tools
 
@@ -45,7 +46,7 @@ What the plugin ships:
 | `remember` | Store a short fact. Returns similar existing entries so that contradictions are noticed. With `supersedes` it replaces old entries. |
 | `supersede` | Mark entries as outdated. They are no longer found but are kept as history. |
 | `search_knowledge` | Hybrid search over active entries; with `project`: that project plus cross-project knowledge |
-| `list_documents` | List entries, e.g. "what was learned recently" (`include_superseded` also shows outdated ones) |
+| `list_documents` | List entries with their usage counters, e.g. "what was learned recently" (`include_superseded` also shows outdated ones, `unused_days` only entries nobody used for that long) |
 | `get_document` | Read one entry by its ID |
 | `add_document` | Store a longer document; the same `source` replaces the old one |
 | `delete_document` | Delete for good, only for junk or on request; entries it had superseded become current again |
@@ -211,6 +212,36 @@ nothing, so no knowledge is injected at start; it only looks for transcripts tha
 
 The project is taken from the working directory recorded in the transcript (a removed agent worktree still maps
 to its repository).
+
+### Keeping the memory lean
+
+Strict rules for what is stored, duplicate checks and `supersede` keep most clutter out (see above). Two things
+they cannot catch: an entry that becomes stale without anyone contradicting it, and two entries that overlap
+without being near-identical. For those there are usage counters and a consolidation run.
+
+**Usage counters.** Every entry counts how often the prompt hook injected it and how often Claude retrieved it
+(a `search_knowledge` hit or `get_document`), with the time of its last use. `list_documents` shows the counters,
+`list_documents` with `unused_days` lists entries nobody used for that long, and the visualisation has a "Used"
+column. Unused is only a hint: an entry can matter without being found often, so nothing is removed
+automatically. The counters start when the MCP server of version 0.8 first opens the database; before that has
+run for the requested number of days, nothing is called unused.
+
+**Consolidation** (`/knowledge-base:consolidate`) runs in two steps:
+
+1. **Plan.** Active facts whose similarity reaches the "similar" threshold (0.70 for `bge-m3`) are grouped, within
+   the same project or among the global entries, at most 6 per group, most similar first. A model call (8 groups
+   per call) decides per group: **keep** (the default: similar topic alone is no reason to change anything),
+   **supersede** (one entry already says everything that still holds) or **merge** (a combined entry, written only
+   from the entries' content). The model sees how often each entry was used. Its answer is checked: only IDs of
+   the group, a merge must replace at least two entries, and the merged text passes the same checks as any new
+   fact, including the secrets filter. The plan is printed and saved; nothing changes yet.
+2. **Apply** (`consolidate-apply <plan-id>`) carries out exactly the saved plan after you confirm; the plan ID ties
+   it to the run you saw, and the full text of every merge is shown before. A group is skipped if one of its
+   entries changed in the meantime, and plans older than a day are refused. Merged entries carry the tag
+   `consolidated`; a merge can be undone with `delete_document` on the new entry, which makes the replaced entries
+   current again. A supersede has no direct undo.
+
+The run also lists entries unused for 30 days, for you to review.
 
 ## Measurements
 

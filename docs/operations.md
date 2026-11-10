@@ -10,6 +10,7 @@ Installation details, configuration, databases and commands. How the parts work 
 - [Retrieval per prompt](#retrieval-per-prompt)
 - [Learning at session end](#learning-at-session-end)
 - [Visualisation](#visualisation)
+- [Consolidation](#consolidation)
 - [Usage report](#usage-report)
 - [Embedding model](#embedding-model)
 - [Scaling](#scaling)
@@ -183,6 +184,34 @@ every 10 seconds, background tabs at least once a minute, so it only stops after
 and log are in the cache directory (`viz.pid`, `viz.log`). There is no authentication, so the server only listens
 on loopback addresses and rejects requests with a foreign `Host` header (DNS rebinding). Flags: `--addr`,
 `--open`, `--limit` (newest N entries, default 5000), `--detach`, `--stop`, `--idle`.
+
+## Consolidation
+
+In Claude Code: `/knowledge-base:consolidate` (optionally with a project name). It plans, shows the proposed
+changes, and applies them only after you agree. From the shell:
+
+```bash
+"$KB" consolidate                       # plan: print and save the proposed changes, change nothing
+"$KB" consolidate --project my-project  # only that project's entries (plus global ones)
+"$KB" consolidate-apply <plan-id>        # apply exactly the saved plan (ID printed by consolidate)
+```
+
+| Flag | Effect |
+|---|---|
+| `--min-sim` | similarity from which entries are grouped (default: the model's "similar" threshold, 0.70 for `bge-m3`) |
+| `--max-groups` | review at most this many groups per run (default 40; one model call per 8 groups) |
+| `--unused-days` | also list entries neither injected nor retrieved for this many days (default 30, 0 = off) |
+
+The plan is saved as `consolidate-plan.json` in the cache directory and is valid for a day. Only the latest plan
+can be applied, and only with its ID; a run without proposed changes removes it. A group is skipped if one of its
+entries was changed or replaced since planning. Applying is a separate command so that a permission rule for
+planning never covers it: the skill may plan without asking, but applying always goes through Claude Code's
+permission prompt. The model calls use
+the same `claude -p` setup as the evaluation at session end (`KB_EXTRACT_MODEL`, `KB_CLAUDE_BIN`). How it works:
+[Keeping the memory lean](how-it-works.md#keeping-the-memory-lean).
+
+Usage counters (how often an entry was injected or retrieved) are stored in the table `doc_usage`. `migrate` does
+not copy them; they start again in the target database.
 
 ## Usage report
 

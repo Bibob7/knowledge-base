@@ -49,6 +49,10 @@ type docJSON struct {
 	CreatedAt    string   `json:"createdAt"`
 	UpdatedAt    string   `json:"updatedAt"`
 	Content      string   `json:"content"`
+	Used         int      `json:"used"` // injected + retrieved
+	Injected     int      `json:"injected"`
+	Retrieved    int      `json:"retrieved"`
+	LastUsed     string   `json:"lastUsed"`
 	X            float64  `json:"x"`
 	Y            float64  `json:"y"`
 }
@@ -127,6 +131,10 @@ func build(ctx context.Context, o Options) (*dataJSON, error) {
 			SupersededBy: d.SupersededBy, Source: d.Source, Tags: nonNil(d.Tags),
 			CreatedAt: d.CreatedAt.Format(time.RFC3339), UpdatedAt: d.UpdatedAt.Format(time.RFC3339),
 			Content: content, X: pts[i][0], Y: pts[i][1],
+			Used: d.Usage.Injected + d.Usage.Retrieved, Injected: d.Usage.Injected, Retrieved: d.Usage.Retrieved,
+		}
+		if d.Usage.LastUsed != nil {
+			out.Docs[i].LastUsed = d.Usage.LastUsed.Format(time.RFC3339)
 		}
 		if d.Project != "" && !seen[d.Project] {
 			seen[d.Project] = true

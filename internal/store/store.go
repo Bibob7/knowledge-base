@@ -37,6 +37,15 @@ type Store interface {
 	// Snapshot returns the newest `limit` entries including their document embeddings
 	// (the mean of the chunk embeddings), for the visualisation.
 	Snapshot(ctx context.Context, limit int) (*Snapshot, error)
+	// RecordUse counts that the entries were used in a session: injected by the prompt
+	// hook or retrieved by Claude. Unknown IDs are ignored.
+	RecordUse(ctx context.Context, ids []int64, kind UseKind) error
+	// UsageSince reports when usage tracking started (zero if it has not).
+	UsageSince(ctx context.Context) (time.Time, error)
+	// Unused returns active entries (of the project plus global ones; without project all)
+	// that were created before `before` and have not been used since, least recently
+	// used first.
+	Unused(ctx context.Context, project string, before time.Time, limit int) ([]DocumentInfo, error)
 	// CurrentEmbedding reports the dimension of the stored vectors and the model they
 	// were created with (empty if unknown).
 	CurrentEmbedding(ctx context.Context) (dim int, model string, err error)
@@ -169,6 +178,7 @@ type DocumentInfo struct {
 	Tags         []string
 	Chunks       int
 	UpdatedAt    time.Time
+	Usage        Usage
 }
 
 type Document struct {
@@ -190,6 +200,7 @@ type SnapshotDoc struct {
 	UpdatedAt    time.Time
 	Content      string
 	Vec          []float32
+	Usage        Usage
 }
 
 // Snapshot is a read-only view of the whole knowledge base for visualisation.
