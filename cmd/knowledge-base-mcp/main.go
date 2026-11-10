@@ -403,7 +403,11 @@ func toDocInfo(d store.DocumentInfo) docInfo {
 
 // recordUse counts entries Claude retrieved. A failure is only logged: the counters are
 // a hint for reviews and must never cost a result.
+// recordUse counts a retrieval. It is a write; a short timeout keeps a held write lock
+// (another session, a reindex) from delaying the tool result.
 func (a *app) recordUse(ctx context.Context, ids []int64) {
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
 	if err := a.store.RecordUse(ctx, ids, store.UseRetrieved); err != nil {
 		log.Printf("recording usage: %v", err)
 	}

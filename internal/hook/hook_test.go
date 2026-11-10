@@ -3,6 +3,7 @@ package hook
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -77,5 +78,46 @@ func TestPromptHookCountsInjectedEntries(t *testing.T) {
 	}
 	if doc, _ := st.GetDocument(ctx, res.ID); out.Len() != 0 || doc.Usage.Injected != 1 {
 		t.Errorf("second prompt: output %q, usage %+v", out.String(), doc.Usage)
+	}
+}
+
+// A database whose MCP server has not created the usage table yet (plugin updated, server
+// not restarted): the hook opens it read-only, counting fails, the injection still works.
+func TestPromptHookWithoutUsageTable(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("KB_PROJECT", "app")
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kb.db")
+	st, err := store.Open(ctx, "sqlite://"+path, testDim, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddDocument(ctx, store.DocumentInput{Title: "commits", Project: "app", Kind: "fact",
+		Chunks: []store.ChunkInput{{Content: "Commits use the Conventional Commits format.", Embedding: []float32{1, 0, 0, 0}}}}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE doc_usage`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	ro, err := store.OpenReadOnly(ctx, "sqlite://"+path, testDim, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	d := Deps{Store: ro, Embed: constEmbed(t), MinSim: 0.5}
+	in := `{"session_id":"s2","cwd":"/nowhere","hook_event_name":"UserPromptSubmit","prompt":"How do I write the commit message?"}`
+	var out bytes.Buffer
+	if err := Run(ctx, strings.NewReader(in), &out, d); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Conventional Commits") {
+		t.Fatalf("entry not injected: %s", out.String())
 	}
 }
