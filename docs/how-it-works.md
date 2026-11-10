@@ -235,9 +235,11 @@ run for the requested number of days, nothing is called unused.
    from the entries' content). The model sees how often each entry was used. Its answer is checked: only IDs of
    the group, a merge must replace at least two entries, and the merged text passes the same checks as any new
    fact, including the secrets filter. The plan is printed and saved; nothing changes yet.
-2. **Apply** carries out exactly the saved plan after you confirm. A group is skipped if one of its entries changed
-   in the meantime, and plans older than a day are refused. Merged entries carry the tag `consolidated`; a merge
-   can be undone with `delete_document` on the new entry, which makes the replaced entries current again.
+2. **Apply** (`consolidate-apply <plan-id>`) carries out exactly the saved plan after you confirm; the plan ID ties
+   it to the run you saw, and the full text of every merge is shown before. A group is skipped if one of its
+   entries changed in the meantime, and plans older than a day are refused. Merged entries carry the tag
+   `consolidated`; a merge can be undone with `delete_document` on the new entry, which makes the replaced entries
+   current again. A supersede has no direct undo.
 
 The run also lists entries unused for 30 days, for you to review.
 

@@ -55,6 +55,12 @@ func runSubcommand(args []string) (handled bool, code int) {
 			return true, 1
 		}
 		return true, 0
+	case "consolidate-apply":
+		if err := runConsolidateApply(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return true, 1
+		}
+		return true, 0
 	case "reindex":
 		if err := runReindex(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -445,18 +451,21 @@ func openBrowser(url string) {
 	_ = exec.Command(name, url).Start()
 }
 
-// runConsolidate reviews groups of similar entries (see extract.Deps.Plan). Without
-// --apply it only plans: it prints the proposed changes and saves them; --apply carries
-// out the saved plan, so exactly what was shown is applied.
+// runConsolidate reviews groups of similar entries (see extract.Deps.Plan). It only plans:
+// it prints the proposed changes in full and saves them under a plan ID. Applying is a
+// separate command (consolidate-apply <id>), so that a permission rule for planning never
+// covers applying, and only the plan that was shown can be applied.
 func runConsolidate(args []string) error {
 	fs := flag.NewFlagSet("consolidate", flag.ContinueOnError)
 	project := fs.String("project", "", "only this project's entries (plus cross-project ones); empty = all")
 	minSim := fs.Float64("min-sim", 0, "similarity from which entries are grouped (default: the model's \"similar\" threshold)")
 	maxGroups := fs.Int("max-groups", 40, "review at most this many groups (one model call per 8 groups)")
 	unusedDays := fs.Int("unused-days", 30, "also list entries not used for this many days (0 = no list)")
-	apply := fs.Bool("apply", false, "apply the plan saved by the last run")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments %q; to apply a plan use: consolidate-apply <plan-id>", fs.Args())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -467,19 +476,6 @@ func runConsolidate(args []string) error {
 	defer closeFn()
 	d.Logf = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
 	path := extract.PlanPath()
-
-	if *apply {
-		plan, err := extract.LoadPlan(path)
-		if err != nil {
-			return err
-		}
-		applied, skipped, err := d.Apply(ctx, plan)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("%d change(s) applied, %d skipped. Undo a merge with delete_document on the new entry.\n", applied, skipped)
-		return os.Remove(path)
-	}
 
 	if *minSim <= 0 {
 		cfg, err := config.Load()
@@ -512,22 +508,52 @@ func runConsolidate(args []string) error {
 			if contains64(a.Supersedes, e.ID) {
 				mark = "  old "
 			}
-			fmt.Printf("%s #%d: %s\n", mark, e.ID, oneLine(e.Content, 160))
+			fmt.Printf("%s #%d: %s\n", mark, e.ID, oneLine(e.Content, 0))
 		}
 		if a.Action == "merge" {
-			fmt.Printf("  new : %s\n", oneLine(a.Content, 400))
+			fmt.Printf("  new : %s\n", oneLine(a.Content, 0))
 		}
 	}
 	if len(changes) > 0 {
 		if err := extract.SavePlan(path, plan); err != nil {
 			return err
 		}
-		fmt.Printf("\nNothing was changed yet. To apply exactly these changes: consolidate --apply\n")
+		fmt.Printf("\nNothing was changed yet. To apply exactly these changes: consolidate-apply %s\n", plan.ID)
+	} else if err := extract.RemovePlan(path); err != nil { // an older plan must not stay applicable
+		return err
 	}
 	if *unusedDays > 0 {
 		return printUnused(ctx, d.Store, *project, *unusedDays)
 	}
 	return nil
+}
+
+// runConsolidateApply carries out the saved plan, if it has the given ID.
+func runConsolidateApply(args []string) error {
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		return fmt.Errorf("usage: consolidate-apply <plan-id> (the ID printed by consolidate)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	d, closeFn, err := newExtractDeps(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	d.Logf = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+	path := extract.PlanPath()
+	plan, err := extract.LoadPlan(path)
+	if err != nil {
+		return err
+	}
+	applied, skipped, err := d.Apply(ctx, plan, args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%d change(s) applied, %d skipped.\n", applied, skipped)
+	fmt.Println("Undo a merge with delete_document on the new entry (the replaced entries become current again). " +
+		"A supersede has no direct undo: deleting the kept entry restores the replaced ones but loses the kept one.")
+	return extract.RemovePlan(path)
 }
 
 func printUnused(ctx context.Context, st store.Store, project string, days int) error {
@@ -580,7 +606,7 @@ func contains64(s []int64, v int64) bool {
 
 func oneLine(s string, n int) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > n {
+	if r := []rune(s); n > 0 && len(r) > n {
 		return string(r[:n]) + "…"
 	}
 	return s

@@ -118,7 +118,10 @@ func TestPlanAndApplyMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	applied, skipped, err := d.Apply(ctx, loaded)
+	if _, _, err := d.Apply(ctx, loaded, "other"); err == nil {
+		t.Fatal("a plan must only be applied with its own ID")
+	}
+	applied, skipped, err := d.Apply(ctx, loaded, plan.ID)
 	if err != nil || applied != 1 || skipped != 0 {
 		t.Fatalf("apply: %d applied, %d skipped, %v", applied, skipped, err)
 	}
@@ -132,7 +135,7 @@ func TestPlanAndApplyMerge(t *testing.T) {
 		}
 	}
 	// Applying the same plan again changes nothing: the entries are no longer active.
-	if applied, skipped, _ := d.Apply(ctx, loaded); applied != 0 || skipped != 1 {
+	if applied, skipped, _ := d.Apply(ctx, loaded, loaded.ID); applied != 0 || skipped != 1 {
 		t.Errorf("second apply: %d applied, %d skipped", applied, skipped)
 	}
 }
@@ -148,7 +151,7 @@ func TestPlanSupersedeAndInvalidDecisions(t *testing.T) {
 	if a.Action != "supersede" || a.KeepID != ids[2] || fmt.Sprint(a.Supersedes) != fmt.Sprint(ids[:2]) {
 		t.Fatalf("keep_id must not supersede itself: %+v", a)
 	}
-	if _, _, err := d.Apply(ctx, plan); err != nil {
+	if _, _, err := d.Apply(ctx, plan, plan.ID); err != nil {
 		t.Fatal(err)
 	}
 	if doc, _ := st.GetDocument(ctx, ids[2]); doc.Status != "active" {
@@ -176,11 +179,60 @@ func TestPlanSupersedeAndInvalidDecisions(t *testing.T) {
 
 func TestApplyRefusesOldPlans(t *testing.T) {
 	d, _, _ := consolidateEnv(t, `{"groups":[]}`)
-	old := &Plan{CreatedAt: time.Now().Add(-48 * time.Hour), Actions: []PlanAction{{Action: "merge"}}}
-	if _, _, err := d.Apply(context.Background(), old); err == nil {
+	old := &Plan{ID: "p1", CreatedAt: time.Now().Add(-48 * time.Hour), Actions: []PlanAction{{Action: "merge"}}}
+	if _, _, err := d.Apply(context.Background(), old, "p1"); err == nil {
 		t.Error("a plan older than a day must be refused")
 	}
 	if _, err := LoadPlan(filepath.Join(t.TempDir(), "missing.json")); err == nil || !strings.Contains(err.Error(), "consolidate") {
 		t.Errorf("missing plan: %v", err)
+	}
+}
+
+// Entries that changed between planning and applying (superseded by someone else, or a
+// different text under the same ID, e.g. a plan made against another database) make
+// the group be skipped.
+func TestApplySkipsChangedEntries(t *testing.T) {
+	ctx := context.Background()
+	reply := `{"groups":[{"g":1,"action":"supersede","keep_id":3,"supersedes":[1,2]}]}`
+
+	d, st, ids := consolidateEnv(t, reply)
+	plan, err := d.Plan(ctx, ConsolidateOptions{Project: "app", MinSim: 0.95})
+	if err != nil || len(plan.Changes()) != 1 {
+		t.Fatalf("plan %+v, %v", plan, err)
+	}
+	if _, err := st.Supersede(ctx, []int64{ids[0]}, ids[3]); err != nil {
+		t.Fatal(err)
+	}
+	if applied, skipped, err := d.Apply(ctx, plan, plan.ID); err != nil || applied != 0 || skipped != 1 {
+		t.Errorf("superseded meanwhile: %d applied, %d skipped, %v", applied, skipped, err)
+	}
+
+	d, st, _ = consolidateEnv(t, reply)
+	plan, err = d.Plan(ctx, ConsolidateOptions{Project: "app", MinSim: 0.95})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Actions[0].Entries[0].Content = "A different text that was shown to the user."
+	if applied, skipped, _ := d.Apply(ctx, plan, plan.ID); applied != 0 || skipped != 1 {
+		t.Errorf("different content: %d applied, %d skipped", applied, skipped)
+	}
+	if doc, _ := st.GetDocument(ctx, plan.Actions[0].Entries[1].ID); doc.Status != "active" {
+		t.Error("nothing may be superseded when the group is skipped")
+	}
+}
+
+func TestRemovePlan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plan.json")
+	if err := RemovePlan(path); err != nil {
+		t.Errorf("removing a missing plan: %v", err)
+	}
+	if err := SavePlan(path, &Plan{ID: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemovePlan(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPlan(path); err == nil {
+		t.Error("plan still there")
 	}
 }

@@ -2,6 +2,8 @@ package extract
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +66,9 @@ type PlanAction struct {
 
 // Plan is what a consolidation run proposes.
 type Plan struct {
+	// ID names this plan: applying requires it, so only the plan the user was shown is
+	// applied (not one that another run saved in the meantime).
+	ID        string       `json:"id"`
 	CreatedAt time.Time    `json:"created_at"`
 	Actions   []PlanAction `json:"actions"`
 }
@@ -121,7 +126,7 @@ func (d Deps) Plan(ctx context.Context, o ConsolidateOptions) (*Plan, error) {
 			usage[e.doc.ID], created[e.doc.ID], tags[e.doc.ID] = e.doc.Usage, e.doc.CreatedAt, e.doc.Tags
 		}
 	}
-	plan := &Plan{CreatedAt: time.Now()}
+	plan := &Plan{ID: newPlanID(), CreatedAt: time.Now()}
 	for start := 0; start < len(groups); start += groupsPerCall {
 		batch := groups[start:min(start+groupsPerCall, len(groups))]
 		decided, err := d.decideGroups(ctx, batch, usage, created, tags)
@@ -269,9 +274,19 @@ func (d Deps) decideGroups(ctx context.Context, groups []PlanAction, usage map[i
 	return res, nil
 }
 
-// Apply carries out the changes of a plan. A group is skipped if one of its entries was
-// changed since planning (superseded or deleted meanwhile).
-func (d Deps) Apply(ctx context.Context, p *Plan) (applied, skipped int, err error) {
+func newPlanID() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// Apply carries out the changes of the plan with the given ID. A group is skipped if one
+// of its entries changed since planning (superseded, deleted or edited meanwhile, or the
+// plan was made against another database).
+func (d Deps) Apply(ctx context.Context, p *Plan, id string) (applied, skipped int, err error) {
+	if id == "" || p.ID != id {
+		return 0, 0, fmt.Errorf("the saved plan is %q, not %q; plan again and apply the ID it prints", p.ID, id)
+	}
 	if time.Since(p.CreatedAt) > planMaxAge {
 		return 0, 0, fmt.Errorf("the plan is from %s; plan again", p.CreatedAt.Format(time.DateTime))
 	}
@@ -311,7 +326,7 @@ func (d Deps) Apply(ctx context.Context, p *Plan) (applied, skipped int, err err
 func (d Deps) allActive(ctx context.Context, a PlanAction) bool {
 	for _, e := range a.Entries {
 		doc, err := d.Store.GetDocument(ctx, e.ID)
-		if err != nil || doc.Status != "active" {
+		if err != nil || doc.Status != "active" || oneSpace(doc.Content) != oneSpace(e.Content) {
 			return false
 		}
 	}
@@ -333,7 +348,7 @@ func SavePlan(path string, p *Plan) error {
 func LoadPlan(path string) (*Plan, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("no saved plan; run consolidate without --apply first")
+		return nil, fmt.Errorf("no saved plan; run consolidate first")
 	}
 	if err != nil {
 		return nil, err
@@ -344,6 +359,17 @@ func LoadPlan(path string) (*Plan, error) {
 	}
 	return &p, nil
 }
+
+// RemovePlan deletes a saved plan (a run without changes must not leave an older plan
+// behind that could still be applied).
+func RemovePlan(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func oneSpace(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // PlanPath is where the plan waits to be applied.
 func PlanPath() string { return filepath.Join(CacheDir(), "consolidate-plan.json") }
